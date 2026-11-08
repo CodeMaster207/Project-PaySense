@@ -6,9 +6,10 @@ services:
     runtime: node
     region: singapore
     plan: free
+    # pnpm runs through npx because Render's build image has a read-only global npm folder (npm install -g fails).
     # --prod=false keeps the dev dependencies (Tailwind, TypeScript, cross-env) that the build needs.
-    buildCommand: npm install -g pnpm@12.18.0 && pnpm install --frozen-lockfile --prod=false && pnpm build
-    startCommand: pnpm start
+    buildCommand: npx --yes pnpm@12.18.0 install --frozen-lockfile --prod=false && npx --yes pnpm@12.18.0 build
+    startCommand: npm start
     envVars:
       - key: NODE_VERSION
         value: 24.22.1
