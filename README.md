@@ -2,6 +2,8 @@
 
 **A money copilot for gig workers and online sellers, built on PayPal.** PaySense connects to your PayPal account, shows you what you actually earned and spent, helps you get paid, and uses AI to make sense of it all. Built for the PayPal AI Hackathon. It runs against the PayPal sandbox only, so no real money moves.
 
+**Live demo:** https://paysense-ufup.onrender.com (free hosting, so the first load after a quiet period can take up to a minute).
+
 ## Who it is for
 
 - **Gig workers and freelancers.** You are paid by several clients, on irregular dates, sometimes in other currencies, and you chase invoices by hand.
