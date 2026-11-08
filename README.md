@@ -17,6 +17,8 @@ For both groups, money from many clients or customers lands in one long PayPal l
 | --- | --- |
 | See every payment across clients and customers | Syncing PayPal into a table you can sort, filter per column, search and export to CSV for your accountant, with each PayPal transaction ID. |
 | Know what PayPal fees cost you and who you depend on | Showing PayPal's fee on every payment, your income after fees, and income by client, with a warning when one client is half or more of your income. |
+| See a cash crunch coming | A 60-day cash-flow forecast that warns you before your balance may go below zero, and shows how much depends on pending invoices being paid. |
+| Know if you made a profit, and show your accountant | A monthly profit and loss report with revenue, fees, expenses and net profit, which you can print or export to CSV. |
 | Know if money is going out faster than it comes in | Sorting payments with AI (subscription or one-off, and category), a live balance, and AI Insights that flags unusual spending and forecasts the next 30 days. |
 | Get paid | **Request payment** sends a real PayPal invoice and tracks it as pending or paid. |
 | Pay suppliers or contractors | **Send via PayPal ID** on the home page pays them through PayPal and records the expense. |
@@ -41,6 +43,8 @@ For both groups, money from many clients or customers lands in one long PayPal l
 | --- | --- |
 | **Expenditures** (home) | Pick a day on the calendar, log expenses, see incomes and goal funding for that day, import from PayPal, and chat with the Personal AI. |
 | **Dashboard** | Day, month and year views with a pie chart, a running account balance and deficit warnings. |
+| **Reports** | A monthly **profit and loss** statement: revenue, PayPal fees, net revenue, expenses and net profit, compared with last month, with the top clients and biggest expenses. Print it, export it to CSV for your accountant, or ask the AI to explain the month in plain words. |
+| **Cash-flow** | A 60-day **forecast** of your balance. It applies job pay, subscription renewals, goal funding and pending invoices on their dates, takes your typical spending off each day, and warns you if the balance may drop below zero. A switch shows how much you rely on pending invoices being paid, and the AI explains the result with one concrete action. |
 | **Incomes** | Add a **job** (salary), a **contract** (fixed-term self-employed work) or one-off **revenue**. **Request payment** sends a real PayPal invoice to another PayPal account and tracks it as pending or paid. |
 | **Goals / Plans** | Describe a savings goal and the AI drafts a daily plan. Refine it, skip days, and let the AI suggest goals. |
 | **Subscriptions** | Add subscriptions, link each one to its PayPal transaction (the AI suggests the match), and cancel it in PayPal when PayPal supplied a subscription ID. |
@@ -55,6 +59,8 @@ PaySense uses AI for decisions about your data, not only for writing text. Each 
 | --- | --- | --- |
 | **Payment classification** | PayPal sync and "Import from PayPal" | Decides whether money out is a recurring subscription or a one-off expense, and files subscriptions under Streaming, Software, Shopping, Utilities or Other. Answers are limited to fixed options and checked before use. |
 | **Subscription to transaction matching** | Subscriptions, "PayPal link" card | Compares a subscription you added by hand with your unlinked PayPal transactions and picks the most likely match, or none. You confirm before anything is linked. |
+| **Cash-flow advice** | Cash-flow, "Explain this forecast" | Reads the finished forecast and writes two or three sentences ending in one concrete action, such as chasing a named pending invoice or pausing a named subscription. The app calculates the projection; the AI is told to use only those figures. Without an AI account a fixed sentence is shown. |
+| **Month summary** | Reports, "Explain this month" | Writes two or three plain sentences about a month's profit and loss. The app calculates every figure and hands them to the AI, which is told to use only those numbers. Without an AI account a fixed sentence built from the same figures is shown. |
 | **Invoice assistant** | Incomes, Request payment | Turns a sentence such as "invoice Acme RM500 for logo design, due in 14 days" into a drafted PayPal invoice: client, amount, description and due date. The app checks the draft against what you typed, so the AI cannot invent an email or change the amount. You review the form and press Send, so nothing is sent without you. |
 | **Spending insights** | AI Insights | Reads recent transactions and returns structured findings: unusual payments, saving ideas, subscriptions worth reviewing, PayPal fees, how dependent your income is on one client, and a 30 day forecast. The totals and client shares are calculated exactly by the app and handed to the AI. Each finding cites real amounts. |
 | **Goal planning** | Goals | Turns a goal (what, how much, by when) into a daily amount and dated checkpoints. Output is validated: dates stay inside the goal period and amounts must be positive. |

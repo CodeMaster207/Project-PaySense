@@ -4,7 +4,9 @@ import type { Where } from 'payload'
 import { getPayloadClient } from '@/lib/payload'
 import { endAppSession, getAppUser, startAppSession } from '@/lib/app-auth'
 import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from '@/lib/ai-config'
-import { aiCategorize, aiChat, aiInsights, aiInvoiceDraft, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
+import { buildMonthReport } from '@/lib/report'
+import { loadForecast } from '@/lib/forecast-input'
+import { aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
 import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
 import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
@@ -308,6 +310,30 @@ export async function deleteForeignPayPalRecordsAction(): Promise<ActionResult<{
     return { ok: true, data: { deleted }, message: `Deleted ${deleted} record${deleted === 1 ? '' : 's'} from the other PayPal account.` }
   } catch (e) {
     return fail(msg(e, 'Could not delete those records.'))
+  }
+}
+
+// ---------- forecast ----------
+/** A short written read of the cash-flow forecast. The projection is rebuilt here, never taken from the browser. */
+export async function forecastAdviceAction(): Promise<ActionResult<{ text: string; ai: boolean }>> {
+  try {
+    const user = await requireUser()
+    return { ok: true, data: await aiForecastAdvice(await loadForecast(user)) }
+  } catch (e) {
+    return fail(msg(e, 'Could not explain the forecast.'))
+  }
+}
+
+// ---------- reports ----------
+/** A short written summary of one month. The figures are recalculated here, never taken from the browser. */
+export async function monthSummaryAction(month: string): Promise<ActionResult<{ text: string; ai: boolean }>> {
+  try {
+    const user = await requireUser()
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(month))) return fail('Pick a valid month.')
+    const [entries, subs] = await Promise.all([loadEntries(user), loadSubscriptions(user)])
+    return { ok: true, data: await aiMonthSummary(buildMonthReport(entries, subs, month, today())) }
+  } catch (e) {
+    return fail(msg(e, 'Could not summarise this month.'))
   }
 }
 

@@ -27,3 +27,6 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+
+# Marker written by scripts/seed-sandbox.mjs so the sandbox is not seeded twice
+.seed-sandbox-done

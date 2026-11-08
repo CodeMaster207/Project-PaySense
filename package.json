@@ -10,7 +10,8 @@
     "format": "oxfmt",
     "generate:importmap": "cross-env NODE_OPTIONS=--no-deprecation payload generate:importmap",
     "generate:types": "cross-env NODE_OPTIONS=--no-deprecation payload generate:types",
-    "payload": "cross-env NODE_OPTIONS=--no-deprecation payload"
+    "payload": "cross-env NODE_OPTIONS=--no-deprecation payload",
+    "seed:sandbox": "node --env-file=.env.local scripts/seed-sandbox.mjs"
   },
   "dependencies": {
     "@payloadcms/db-postgres": "4.0.0-beta.6",

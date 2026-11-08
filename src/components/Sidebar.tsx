@@ -9,6 +9,8 @@ import { Icon, type IconName } from './Icon'
 const nav: { href: string; label: string; icon: IconName }[] = [
   { href: '/', label: 'Homepage', icon: 'home' },
   { href: '/dashboard', label: 'Dashboard', icon: 'chart' },
+  { href: '/reports', label: 'Reports', icon: 'print' },
+  { href: '/forecast', label: 'Cash-flow', icon: 'chart' },
   { href: '/incomes', label: 'Incomes', icon: 'income' },
   { href: '/goals', label: 'Goal Page', icon: 'flag' },
   { href: '/plans', label: 'Plan Page', icon: 'calendar' },

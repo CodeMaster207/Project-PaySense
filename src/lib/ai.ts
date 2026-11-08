@@ -3,6 +3,8 @@ import { type AiConfig, googleAccessToken, PROVIDERS, resolveAi } from './ai-con
 import { addDays, daysBetween, rm, today } from './dates'
 import { feeSummary, incomeByClient } from './insights'
 import { type InvoiceDraft, parseInvoiceText } from './invoice-parse'
+import type { Forecast } from './forecast'
+import type { MonthReport } from './report'
 import type { EntryView, Insight, PlanDraft, PlanItem, SubscriptionView } from './types'
 
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -227,6 +229,88 @@ export async function aiInvoiceDraft(text: string): Promise<{ draft: InvoiceDraf
     } catch {}
   }
   return { draft: parsed, ai: false }
+}
+
+/**
+ * A short plain-English summary of one month's profit and loss. The app calculates every figure; the AI only
+ * phrases them. Without an AI account a fixed sentence built from the same figures is used.
+ */
+export async function aiMonthSummary(r: MonthReport): Promise<{ text: string; ai: boolean }> {
+  const change = r.prev ? r.netProfit - r.prev.netProfit : null
+  const fallback =
+    `You earned ${rm(r.revenue)}, paid ${rm(r.fees)} in PayPal fees and ${rm(r.expenses + r.subscriptions)} in expenses, leaving a net ${r.netProfit < 0 ? 'loss' : 'profit'} of ${rm(Math.abs(r.netProfit))}.` +
+    (change === null ? '' : ` That is ${rm(Math.abs(change))} ${change >= 0 ? 'better' : 'worse'} than last month.`) +
+    (r.clients[0] && r.clients[0].share >= 0.5 && r.clients.length > 1 ? ` ${Math.round(r.clients[0].share * 100)}% of your revenue came from ${r.clients[0].name}.` : '')
+  const text = await llm(
+    [
+      {
+        role: 'system',
+        content:
+          'You are a bookkeeping assistant for gig workers and small online sellers. Write 2 or 3 short plain-English sentences that summarise the month using ONLY the figures given. ' +
+          'Mention the change from last month if there is one, what PayPal fees cost, and one thing to watch. No markdown, no lists, and never invent or recalculate numbers. Amounts are in RM.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          month: r.month,
+          revenue: r.revenue,
+          paypalFees: r.fees,
+          expenses: r.expenses,
+          estimatedSubscriptions: r.subscriptions,
+          netProfit: r.netProfit,
+          lastMonth: r.prev,
+          topClients: r.clients.slice(0, 3).map((c) => ({ name: c.name, amount: c.amount, sharePercent: Math.round(c.share * 100) })),
+          topExpenses: r.expenseItems.slice(0, 3).map((c) => ({ name: c.name, amount: c.amount })),
+        }),
+      },
+    ],
+    false,
+  )
+  const clean = text?.replace(/\s+/g, ' ').trim().slice(0, 600)
+  return clean ? { text: clean, ai: true } : { text: fallback, ai: false }
+}
+
+/**
+ * A short plain-English read of the cash-flow forecast with one concrete action. The projection is calculated by the
+ * app; the AI only explains it. Without an AI account a fixed sentence from the same figures is used.
+ */
+export async function aiForecastAdvice(f: Forecast): Promise<{ text: string; ai: boolean }> {
+  const s = f.withInvoices
+  const outflows = f.events.filter((e) => e.amount < 0).sort((a, b) => a.amount - b.amount).slice(0, 3)
+  const invoices = f.events.filter((e) => e.kind === 'invoice')
+  const fallback = s.firstNegative
+    ? `Your balance may drop below zero on ${s.firstNegative} and reach a low of -${rm(Math.abs(s.lowest.balance))} on ${s.lowest.date}.` +
+      (invoices.length ? ` ${invoices.length} pending invoice${invoices.length === 1 ? ' is' : 's are'} counted, so chasing ${invoices.length === 1 ? 'it' : 'them'} matters.` : ' Consider invoicing sooner or trimming spending.')
+    : `Your balance stays above zero for the next ${f.days} days, with a low of ${rm(s.lowest.balance)} on ${s.lowest.date}.` +
+      (f.withoutInvoices.firstNegative ? ` It only stays positive because pending invoices are paid, so follow them up.` : '')
+  const text = await llm(
+    [
+      {
+        role: 'system',
+        content:
+          'You are a cash-flow coach for gig workers and small online sellers. Write 2 or 3 short plain-English sentences about the forecast, ending with ONE concrete action ' +
+          '(for example chase a named pending invoice, pause a named subscription, or delay a named expense). Use ONLY the figures and names given. No markdown, no lists, never invent or recalculate numbers. Amounts are RM.',
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          days: f.days,
+          balanceToday: f.start,
+          typicalSpendingPerDay: f.dailySpend,
+          lowestPoint: s.lowest,
+          firstDayBelowZero: s.firstNegative,
+          balanceIn30Days: s.at30,
+          balanceAtEnd: s.end,
+          ifPendingInvoicesAreNotPaid: { firstDayBelowZero: f.withoutInvoices.firstNegative, lowestPoint: f.withoutInvoices.lowest },
+          pendingInvoices: invoices.map((e) => ({ what: e.label, expected: e.date, amount: e.amount })),
+          biggestUpcomingCosts: outflows.map((e) => ({ what: e.label, date: e.date, amount: -e.amount })),
+        }),
+      },
+    ],
+    false,
+  )
+  const clean = text?.replace(/\s+/g, ' ').trim().slice(0, 700)
+  return clean ? { text: clean, ai: true } : { text: fallback, ai: false }
 }
 
 const TXN_CATEGORIES = ['Streaming', 'Software', 'Shopping', 'Utilities', 'Other'] as const
