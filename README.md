@@ -1,6 +1,39 @@
 # PaySense
 
-A web app that connects to the **PayPal sandbox** and uses **AI** to make sense of your money: it sorts imported PayPal payments, finds the PayPal transaction behind each subscription, spots unusual spending, and turns savings goals into daily plans. Built for the PayPal AI Hackathon.
+**A money copilot for gig workers and online sellers, built on PayPal.** PaySense connects to your PayPal account, shows you what you actually earned and spent, helps you get paid, and uses AI to make sense of it all. Built for the PayPal AI Hackathon. It runs against the PayPal sandbox only, so no real money moves.
+
+## Who it is for
+
+- **Gig workers and freelancers.** You are paid by several clients, on irregular dates, sometimes in other currencies, and you chase invoices by hand.
+- **Online retailers and small sellers.** Customer payments arrive in PayPal, and the same account pays suppliers and software subscriptions.
+
+## The problem
+
+For both groups, money from many clients or customers lands in one long PayPal list. It is hard to see what you really earned, whether more is going out than coming in, which subscriptions are quietly draining the account, and who still owes you. Most budgeting tools are not PayPal-aware, or need hours of manual tagging.
+
+## How PaySense helps
+
+| You want to... | PaySense does it by... |
+| --- | --- |
+| See every payment across clients and customers | Syncing PayPal into a table you can sort, filter per column, search and export to CSV for your accountant, with each PayPal transaction ID. |
+| Know what PayPal fees cost you and who you depend on | Showing PayPal's fee on every payment, your income after fees, and income by client, with a warning when one client is half or more of your income. |
+| Know if money is going out faster than it comes in | Sorting payments with AI (subscription or one-off, and category), a live balance, and AI Insights that flags unusual spending and forecasts the next 30 days. |
+| Get paid | **Request payment** sends a real PayPal invoice and tracks it as pending or paid. |
+| Pay suppliers or contractors | **Send via PayPal ID** on the home page pays them through PayPal and records the expense. |
+| Earn in other currencies | Converting imported payments to RM while keeping the original amount, and sending invoices in your PayPal account's own currency. |
+| Plan around irregular income | Recording jobs, contracts and revenue, and building savings goals whose daily funding follows what you actually earn. |
+| Keep software costs under control | Tracking subscriptions, linking each to its PayPal payment, and cancelling it in PayPal from the app. |
+
+## PayPal features used
+
+| PayPal feature | Used for |
+| --- | --- |
+| OAuth (client credentials) | Server-side sign-in to your sandbox app. Credentials never reach the browser. |
+| Transaction Search | Importing the last 90 days of transactions. |
+| Reporting balances | Reading the connected account's ID and currency. |
+| Invoicing | **Request payment**: create, send and check invoices. |
+| Payouts | **Send via PayPal ID**: pay a PayPal ID or email. |
+| Subscriptions | Cancelling a subscription in PayPal when you cancel it in the app. |
 
 ## What it does
 
@@ -22,7 +55,8 @@ PaySense uses AI for decisions about your data, not only for writing text. Each 
 | --- | --- | --- |
 | **Payment classification** | PayPal sync and "Import from PayPal" | Decides whether money out is a recurring subscription or a one-off expense, and files subscriptions under Streaming, Software, Shopping, Utilities or Other. Answers are limited to fixed options and checked before use. |
 | **Subscription to transaction matching** | Subscriptions, "PayPal link" card | Compares a subscription you added by hand with your unlinked PayPal transactions and picks the most likely match, or none. You confirm before anything is linked. |
-| **Spending insights** | AI Insights | Reads recent transactions and returns structured findings: unusual payments, saving ideas, subscriptions worth reviewing and a 30 day forecast. Each finding cites real amounts. |
+| **Invoice assistant** | Incomes, Request payment | Turns a sentence such as "invoice Acme RM500 for logo design, due in 14 days" into a drafted PayPal invoice: client, amount, description and due date. The app checks the draft against what you typed, so the AI cannot invent an email or change the amount. You review the form and press Send, so nothing is sent without you. |
+| **Spending insights** | AI Insights | Reads recent transactions and returns structured findings: unusual payments, saving ideas, subscriptions worth reviewing, PayPal fees, how dependent your income is on one client, and a 30 day forecast. The totals and client shares are calculated exactly by the app and handed to the AI. Each finding cites real amounts. |
 | **Goal planning** | Goals | Turns a goal (what, how much, by when) into a daily amount and dated checkpoints. Output is validated: dates stay inside the goal period and amounts must be positive. |
 | **Plan refinement and goal suggestions** | Plans | Breaks a plan into weekly steps and proposes realistic goals from your finances. |
 | **Which goal to fix first** | Dashboard "AI planner" button | Picks the one savings goal whose change would help your budget most, with a reason. |

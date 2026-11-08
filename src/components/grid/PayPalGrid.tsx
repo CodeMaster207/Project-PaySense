@@ -14,6 +14,8 @@ export type GridRow = {
   tag: string
   txnId: string
   original: string
+  /** PayPal's fee on this payment, in RM (0 when none). */
+  fee: number
 }
 
 const asDate = (iso: string) => {
@@ -62,6 +64,15 @@ export function PayPalGrid({ rows, search, printing, onReady }: { rows: GridRow[
         filter: 'agTextColumnFilter',
         valueFormatter: (p) => p.value || '-',
         cellClass: 'font-mono text-xs text-peel-700',
+      },
+      {
+        field: 'fee',
+        headerName: 'PayPal fee',
+        width: 130,
+        type: 'rightAligned',
+        filter: 'agNumberColumnFilter',
+        valueFormatter: (p) => (p.value > 0 ? `-${rm(p.value)}` : '-'),
+        cellClass: 'text-sm text-peel-700',
       },
       {
         field: 'amount',

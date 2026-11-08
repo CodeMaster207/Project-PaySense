@@ -9,6 +9,10 @@ export type EntryView = {
   externalId?: string
   /** The PayPal account the transaction was imported from. */
   paypalAccountId?: string
+  /** PayPal's fee on this payment, in RM. */
+  fee?: number
+  /** Who paid you (money in): the client or customer. */
+  counterparty?: string
   /** What PayPal reported before conversion to RM. */
   originalCurrency?: string
   originalAmount?: number
@@ -78,7 +82,7 @@ export type PaymentRequestView = {
   invoiceId: string
 }
 
-export type Insight = { kind: 'unusual' | 'saving' | 'subscription' | 'forecast'; title: string; detail: string }
+export type Insight = { kind: 'unusual' | 'saving' | 'subscription' | 'forecast' | 'fees' | 'clients'; title: string; detail: string }
 
 export type PayPalMatch = {
   externalId: string

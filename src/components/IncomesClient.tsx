@@ -1,13 +1,13 @@
 'use client'
 
 import { Fragment, useEffect, useState } from 'react'
-import { addEntryAction, addJobAction, deleteEntryAction, endJobAction, refreshPaymentRequestsAction, requestPaymentAction } from '@/app/(frontend)/actions'
+import { addEntryAction, addJobAction, deleteEntryAction, draftInvoiceAction, endJobAction, refreshPaymentRequestsAction, requestPaymentAction } from '@/app/(frontend)/actions'
 import { prettyDay, rm, today } from '@/lib/dates'
 import { FREQUENCIES, frequencyLabel, nextPayday } from '@/lib/jobs'
 import type { EntryView, Frequency, JobView, PaymentRequestView } from '@/lib/types'
 import { DatePicker } from './DatePicker'
 import { Icon } from './Icon'
-import { currencySymbol, toBase } from '@/lib/money'
+import { currencySymbol, toBase, toDisplay } from '@/lib/money'
 import { MoneyInput } from './MoneyInput'
 import { AiNote, btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
@@ -33,6 +33,23 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
   const [reqDays, setReqDays] = useState('7')
   const requestAct = useAction()
   const refreshAct = useAction()
+
+  // AI invoice assistant: fills the form for review. Nothing is sent until "Send request" is pressed.
+  const [assist, setAssist] = useState('')
+  const [draftNote, setDraftNote] = useState<string | null>(null)
+  const draftAct = useAction()
+  function applyDraft(r: { data?: { email: string; amountBase: number; description: string; dueDays: number; shown: string; ai: boolean; missing: string[] } }) {
+    const d = r.data
+    if (!d) return
+    setReqEmail(d.email)
+    setReqAmount(toDisplay(d.amountBase).toFixed(2))
+    setReqNote(d.description)
+    setReqDays(String(d.dueDays))
+    setDraftNote(
+      `${d.ai ? 'Drafted by AI' : 'Drafted by simple rules (no AI account connected)'}: ${d.shown}, due ${d.dueDays === 0 ? 'today' : `in ${d.dueDays} days`}. ` +
+        (d.missing.length ? `Add ${d.missing.join(' and ')}, then check the details below and press Send request.` : 'Check the details below, then press Send request.'),
+    )
+  }
 
   // One-time entry form
   const [date, setDate] = useState(today())
@@ -90,8 +107,9 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
       <PageTitle icon="income" title="Incomes" sub="Track salary, allowance, and freelance pay. PayPal refunds and transfers appear on the dashboard." />
 
       <AiNote>
-        <p>Nothing on this page is written or decided by AI. Jobs, contracts and revenue are entered by you, and the payment dates and amounts are calculated by simple rules.</p>
-        <p>The AI only <b>reads</b> this data. Your incomes are part of the snapshot that the Personal AI chat, the goal planner and AI Insights use, and goal funding follows what you earn, so entering income accurately makes their advice better.</p>
+        <p>Jobs, contracts and revenue are entered by you, and their payment dates and amounts are calculated by simple rules. AI is used in one place here: <b>Request payment</b>.</p>
+        <p><b>Invoice assistant.</b> Type a request in your own words, such as &quot;invoice Acme RM500 for logo design, due in 14 days&quot;, and the AI fills in the invoice: who, how much, what for, and when it is due. The app then checks the result against what you typed, so the AI cannot invent an email address or change the amount. <b>Nothing is sent until you review the form and press Send request.</b> Without an AI account, a simple text reader does the same job.</p>
+        <p>Your incomes are also part of the snapshot that the Personal AI chat, the goal planner and AI Insights read, and AI Insights uses them to show which clients you depend on.</p>
       </AiNote>
       <p className="mb-2 text-sm text-peel-700">
         <b>Job</b>: full-time or part-time employment. <b>Contract</b>: fixed-term self-employed work. <b>Revenue</b>: sales and income for business owners.
@@ -177,10 +195,34 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
                 e.preventDefault()
                 requestAct.run(
                   () => requestPaymentAction({ email: reqEmail, amount: toBase(Number(reqAmount)), description: reqNote, dueDays: Number(reqDays) }),
-                  () => { setReqEmail(''); setReqAmount(''); setReqNote(''); closeForm() },
+                  () => { setReqEmail(''); setReqAmount(''); setReqNote(''); setAssist(''); setDraftNote(null); closeForm() },
                 )
               }}
             >
+              <div className="col-span-2 rounded-xl border-2 border-banana-300 bg-banana-50 p-3">
+                <label className="flex flex-col gap-1 text-sm font-bold">
+                  Describe the invoice in your own words
+                  <span className="flex flex-wrap gap-2">
+                    <input
+                      className="min-w-0 flex-1 font-normal"
+                      maxLength={500}
+                      placeholder="e.g. invoice Acme RM500 for logo design, due in 14 days"
+                      value={assist}
+                      onChange={(e) => setAssist(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return
+                        e.preventDefault()
+                        draftAct.run(() => draftInvoiceAction(assist), applyDraft)
+                      }}
+                    />
+                    <button type="button" className={btnGhost} disabled={draftAct.pending || assist.trim().length < 5} onClick={() => draftAct.run(() => draftInvoiceAction(assist), applyDraft)}>
+                      <Icon name="sparkle" /> {draftAct.pending ? 'Drafting...' : 'Draft with AI'}
+                    </button>
+                  </span>
+                </label>
+                <Feedback error={draftAct.error} />
+                {draftNote && <p className="mt-2 text-sm text-peel-700">{draftNote}</p>}
+              </div>
               <label className="flex flex-col gap-1 text-sm font-bold">
                 Their PayPal email
                 <input required type="email" maxLength={120} placeholder="customer@example.com" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} />
@@ -196,7 +238,7 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
               <label className="flex flex-col gap-1 text-sm font-bold">
                 Due in
                 <select value={reqDays} onChange={(e) => setReqDays(e.target.value)}>
-                  {[0, 7, 14, 30].map((d) => <option key={d} value={d}>{d === 0 ? 'Today' : `${d} days`}</option>)}
+                  {[...new Set([0, 7, 14, 30, Number(reqDays) || 0])].sort((a, b) => a - b).map((d) => <option key={d} value={d}>{d === 0 ? 'Today' : `${d} days`}</option>)}
                 </select>
               </label>
               <p className="col-span-2 text-xs text-peel-500">

@@ -16,6 +16,10 @@ export type PayPalTxn = {
   /** `amount` is converted to the app's base currency (RM); these keep what PayPal reported. */
   currency: string
   originalAmount: number
+  /** PayPal's fee on this payment, in RM (0 when none). */
+  fee: number
+  /** The payer's name or email for money received, which is the client or customer. */
+  counterparty: string
 }
 
 export const paypalConfigured = () => Boolean(process.env.PAYPAL_ACCESS_TOKEN || (process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET))
@@ -61,17 +65,25 @@ type RawTxn = {
     transaction_event_code?: string
     transaction_initiation_date?: string
     transaction_amount?: { value?: string; currency_code?: string }
+    fee_amount?: { value?: string; currency_code?: string }
     transaction_subject?: string
     transaction_status?: string
     billing_agreement_id?: string
     paypal_reference_id?: string
     paypal_reference_id_type?: string
   }
-  payer_info?: { payer_name?: { alternate_full_name?: string } }
+  payer_info?: { email_address?: string; payer_name?: { alternate_full_name?: string } }
   shipping_info?: { name?: string }
 }
 
 /** Reads sandbox transactions (the Reporting API caps one request at 31 days, so we page by window). */
+function feeInRm(fee: { value?: string; currency_code?: string } | undefined, rates: Record<string, number>, fallbackCurrency: string) {
+  const value = Math.abs(Number(fee?.value ?? 0))
+  if (!Number.isFinite(value) || value === 0) return 0
+  const cur = (fee?.currency_code ?? fallbackCurrency).toUpperCase()
+  return Math.round((value / (rates[cur] ?? 1)) * 100) / 100
+}
+
 export async function fetchSandboxTransactions(days = 90): Promise<PayPalTxn[]> {
   const t = await token()
   const { rates } = await getRates()
@@ -106,6 +118,10 @@ export async function fetchSandboxTransactions(days = 90): Promise<PayPalTxn[]> 
         amount: Math.round((amount / (rates[currency] ?? 1)) * 100) / 100,
         currency,
         originalAmount: amount,
+        // PayPal reports fees as negative numbers. Keep them as a positive RM amount.
+        fee: feeInRm(info.fee_amount, rates, currency),
+        // For money in, the payer is the client or customer.
+        counterparty: amount > 0 ? (row.payer_info?.payer_name?.alternate_full_name || row.payer_info?.email_address || '').slice(0, 120) : '',
         kind: isSub && amount < 0 ? 'subscription' : amount < 0 ? 'expense' : 'income',
         status: info.transaction_status === 'V' || info.transaction_status === 'D' ? 'cancelled' : 'active',
       })

@@ -1,6 +1,8 @@
 import 'server-only'
 import { type AiConfig, googleAccessToken, PROVIDERS, resolveAi } from './ai-config'
 import { addDays, daysBetween, rm, today } from './dates'
+import { feeSummary, incomeByClient } from './insights'
+import { type InvoiceDraft, parseInvoiceText } from './invoice-parse'
 import type { EntryView, Insight, PlanDraft, PlanItem, SubscriptionView } from './types'
 
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -79,7 +81,32 @@ async function llm(messages: Msg[], json = false): Promise<string | null> {
   return (await aiRequest(cfg, messages, json)).text
 }
 
-const INSIGHT_KINDS: Insight['kind'][] = ['unusual', 'saving', 'subscription', 'forecast']
+const INSIGHT_KINDS: Insight['kind'][] = ['unusual', 'saving', 'subscription', 'forecast', 'fees', 'clients']
+
+/** Fees finding from the numbers alone. Null when PayPal charged no fees in the period. */
+function feesInsight(entries: EntryView[]): Insight | null {
+  const f = feeSummary(entries, today())
+  if (f.fees <= 0) return null
+  return {
+    kind: 'fees',
+    title: `PayPal fees took ${rm(f.fees)} in 90 days`,
+    detail: `That is ${(f.rate * 100).toFixed(1)}% of the ${rm(f.paypalIncome)} you received through PayPal, so your income after fees is ${rm(f.net)}.`,
+  }
+}
+
+/** Client concentration finding from the numbers alone. Null when there is no income or only one source to compare. */
+function clientsInsight(entries: EntryView[]): Insight | null {
+  const { total, clients } = incomeByClient(entries, today())
+  const top = clients[0]
+  if (!top || total <= 0) return null
+  const pct = Math.round(top.share * 100)
+  if (clients.length === 1) return { kind: 'clients', title: `All your income comes from ${top.name}`, detail: `${rm(top.amount)} in the last 90 days is all from one source, so losing it would stop your income.` }
+  return {
+    kind: 'clients',
+    title: pct >= 50 ? `${pct}% of your income is from ${top.name}` : `Your biggest client is ${top.name} (${pct}%)`,
+    detail: `${rm(top.amount)} of ${rm(total)} in the last 90 days.${pct >= 50 ? ' Relying on one client is risky, so consider growing a second source.' : ' Your income is spread across several clients.'}`,
+  }
+}
 
 function ruleInsights(entries: EntryView[], subs: SubscriptionView[]): Insight[] {
   const out: Insight[] = []
@@ -96,6 +123,10 @@ function ruleInsights(entries: EntryView[], subs: SubscriptionView[]): Insight[]
   }
   const net = recent.filter((e) => e.type === 'income').reduce((a, e) => a + e.amount, 0) - spend.reduce((a, e) => a + e.amount, 0)
   out.push({ kind: 'forecast', title: net >= 0 ? 'You are saving' : 'You are overspending', detail: `Your last 30 days net to ${net < 0 ? '-' : ''}${rm(Math.abs(net))}. At this pace the next 30 days will look similar.` })
+  const fees = feesInsight(entries)
+  if (fees) out.push(fees)
+  const clients = clientsInsight(entries)
+  if (clients) out.push(clients)
   return out
 }
 
@@ -105,18 +136,29 @@ export async function aiInsights(entries: EntryView[], subs: SubscriptionView[])
   const rows = entries
     .filter((e) => e.date >= since && e.date <= today() && e.source !== 'goal')
     .slice(0, 150)
-    .map((e) => ({ date: e.date, type: e.type, what: e.description.slice(0, 60), amount: e.amount, paypal: e.source === 'paypal' }))
+    .map((e) => ({ date: e.date, type: e.type, what: e.description.slice(0, 60), client: e.counterparty?.slice(0, 60), amount: e.amount, fee: e.fee, paypal: e.source === 'paypal' }))
+  const fees = feeSummary(entries, today())
+  const { total: incomeTotal, clients } = incomeByClient(entries, today())
   const text = await llm(
     [
       {
         role: 'system',
         content:
-          'You analyse a person\'s recent transactions (many come from PayPal) and subscriptions. Find at most 6 specific, useful findings. ' +
+          'You analyse the recent transactions (many come from PayPal) and subscriptions of a gig worker or small online seller. Find at most 6 specific, useful findings. ' +
           `Each has kind (one of ${INSIGHT_KINDS.join(', ')}), a short title, and one or two sentences of detail that cite real amounts from the data. ` +
-          'unusual = a payment out of pattern, saving = a concrete way to spend less, subscription = a recurring cost worth reviewing, forecast = what the next month looks like. ' +
-          'Never invent transactions. Reply with JSON: {"insights":[{"kind","title","detail"}]}.',
+          'unusual = a payment out of pattern, saving = a concrete way to spend less, subscription = a recurring cost worth reviewing, forecast = what the next month looks like, ' +
+          'fees = what PayPal fees cost them (use the "fees" summary), clients = how concentrated their income is across clients (use the "clients" shares and flag a client above about half). ' +
+          'Never invent transactions or numbers. Reply with JSON: {"insights":[{"kind","title","detail"}]}.',
       },
-      { role: 'user', content: JSON.stringify({ transactions: rows, subscriptions: subs.map((s) => ({ name: s.name, amount: s.amount, status: s.status, category: s.category })) }) },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          transactions: rows,
+          subscriptions: subs.map((s) => ({ name: s.name, amount: s.amount, status: s.status, category: s.category })),
+          fees: { paidIn90Days: fees.fees, paypalIncome: fees.paypalIncome, incomeAfterFees: fees.net, feePercent: Math.round(fees.rate * 1000) / 10 },
+          clients: { totalIncome: incomeTotal, top: clients.slice(0, 5).map((c) => ({ name: c.name, amount: c.amount, sharePercent: Math.round(c.share * 100) })) },
+        }),
+      },
     ],
     true,
   )
@@ -127,10 +169,64 @@ export async function aiInsights(entries: EntryView[], subs: SubscriptionView[])
         .filter((i) => INSIGHT_KINDS.includes(i.kind as Insight['kind']) && i.title && i.detail)
         .slice(0, 6)
         .map((i) => ({ kind: i.kind as Insight['kind'], title: String(i.title).slice(0, 90), detail: String(i.detail).slice(0, 300) }))
+      // The fee and client findings come from exact numbers, so make sure they are present even if the model skipped them.
+      for (const extra of [fees.fees > 0 ? feesInsight(entries) : null, clientsInsight(entries)]) {
+        if (extra && !insights.some((i) => i.kind === extra.kind)) insights.push(extra)
+      }
       if (insights.length) return { insights, ai: true }
     } catch {}
   }
   return { insights: ruleInsights(entries, subs), ai: false }
+}
+
+/**
+ * Turns a plain-words request ("invoice Acme RM500 for logo design, due in 14 days") into a draft invoice.
+ * The model reads the text, then the code checks the result against what the user actually typed, so the AI can
+ * never invent an email address or a different amount. Without an AI account a simple parser does the job.
+ */
+export async function aiInvoiceDraft(text: string): Promise<{ draft: InvoiceDraft | null; ai: boolean }> {
+  const typed = text.trim().slice(0, 500)
+  const parsed = parseInvoiceText(typed)
+  const reply = await llm(
+    [
+      {
+        role: 'system',
+        content:
+          'You turn a freelancer\'s or online seller\'s request into a draft PayPal invoice. Extract: ' +
+          '"email" (the PayPal email of the person to invoice, only if it is written in the request, otherwise an empty string), ' +
+          '"client" (who is being invoiced, or an empty string), "amount" (a number), "currency" (a 3-letter code if one is stated, otherwise null), ' +
+          '"description" (what the invoice is for, plain words, at most 100 characters), "dueDays" (whole days until it is due, 7 if not stated). ' +
+          'Never invent an email address or an amount. Reply with JSON only.',
+      },
+      { role: 'user', content: typed },
+    ],
+    true,
+  )
+  if (reply) {
+    try {
+      const j = JSON.parse(reply) as Partial<Record<keyof InvoiceDraft, unknown>>
+      const amount = Number(j.amount)
+      const description = String(j.description ?? '').replace(/\s+/g, ' ').trim().slice(0, 120)
+      if (Number.isFinite(amount) && amount > 0 && description) {
+        const email = String(j.email ?? '').trim()
+        const code = String(j.currency ?? '').toUpperCase()
+        return {
+          ai: true,
+          draft: {
+            // An address only counts if the user really typed it.
+            email: email && typed.toLowerCase().includes(email.toLowerCase()) ? email : parsed?.email ?? '',
+            client: String(j.client ?? '').trim().slice(0, 80),
+            // Numbers written in the request win over the model's reading of them.
+            amount: Math.round((parsed && Math.abs(parsed.amount - amount) > 0.01 ? parsed.amount : amount) * 100) / 100,
+            currency: /^[A-Z]{3}$/.test(code) ? code : parsed?.currency ?? null,
+            description,
+            dueDays: Math.min(90, Math.max(0, Math.round(Number(j.dueDays) || parsed?.dueDays || 7))),
+          },
+        }
+      }
+    } catch {}
+  }
+  return { draft: parsed, ai: false }
 }
 
 const TXN_CATEGORIES = ['Streaming', 'Software', 'Shopping', 'Utilities', 'Other'] as const

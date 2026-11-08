@@ -17,6 +17,8 @@ export async function loadEntries(user: AppUser): Promise<EntryView[]> {
     source: d.source ?? 'manual',
     ...(d.externalId ? { externalId: d.externalId } : {}),
     ...(d.paypalAccountId ? { paypalAccountId: d.paypalAccountId } : {}),
+    ...(d.fee != null ? { fee: d.fee } : {}),
+    ...(d.counterparty ? { counterparty: d.counterparty } : {}),
     ...(d.originalCurrency && d.originalAmount != null ? { originalCurrency: d.originalCurrency, originalAmount: d.originalAmount } : {}),
   }))
 }

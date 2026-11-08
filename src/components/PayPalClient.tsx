@@ -13,7 +13,7 @@ import { Icon } from './Icon'
 import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
 type Type = 'all' | 'incomes' | 'expenses' | 'goals'
-type Row = { key: string; date: string; business: string; amount: number; group: 'incomes' | 'expenses' | 'goals'; tag: string; txnId: string; original: string }
+type Row = { key: string; date: string; business: string; amount: number; group: 'incomes' | 'expenses' | 'goals'; tag: string; txnId: string; original: string; fee: number }
 
 const fmtOriginal = (cur?: string, amt?: number) =>
   cur && amt != null && cur !== 'MYR' ? `${cur} ${amt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : ''
@@ -59,12 +59,16 @@ export function PayPalClient({
   const act = useAction()
 
   const rows: Row[] = [
-    ...entries.filter((e) => e.source === 'paypal').map((e): Row => ({ key: `entry-${e.id}`, date: e.date, business: e.description, amount: e.type === 'income' ? e.amount : -e.amount, group: e.type === 'income' ? 'incomes' : 'expenses', tag: e.type === 'income' ? 'income' : 'expense', txnId: e.externalId ?? '', original: fmtOriginal(e.originalCurrency, e.originalAmount) })),
-    ...subs.map((s): Row => ({ key: `sub-${s.id}`, date: s.status === 'active' ? s.renewDate : s.terminationDate, business: s.name, amount: -s.amount, group: 'expenses', tag: 'expense', txnId: s.paypalTransactionId, original: fmtOriginal(s.originalCurrency, s.originalAmount) })),
-    ...goalFunds.map((e): Row => ({ key: `goal-${e.id}`, date: e.date, business: e.description.replace(/^Goal: /, ''), amount: -e.amount, group: 'goals', tag: 'goal fund', txnId: '', original: '' })),
+    ...entries.filter((e) => e.source === 'paypal').map((e): Row => ({ key: `entry-${e.id}`, date: e.date, business: e.description, amount: e.type === 'income' ? e.amount : -e.amount, group: e.type === 'income' ? 'incomes' : 'expenses', tag: e.type === 'income' ? 'income' : 'expense', txnId: e.externalId ?? '', original: fmtOriginal(e.originalCurrency, e.originalAmount), fee: e.fee ?? 0 })),
+    ...subs.map((s): Row => ({ key: `sub-${s.id}`, date: s.status === 'active' ? s.renewDate : s.terminationDate, business: s.name, amount: -s.amount, group: 'expenses', tag: 'expense', txnId: s.paypalTransactionId, original: fmtOriginal(s.originalCurrency, s.originalAmount), fee: 0 })),
+    ...goalFunds.map((e): Row => ({ key: `goal-${e.id}`, date: e.date, business: e.description.replace(/^Goal: /, ''), amount: -e.amount, group: 'goals', tag: 'goal fund', txnId: '', original: '', fee: 0 })),
   ]
     .filter((r) => (type === 'all' || type === r.group) && (!from || r.date >= from) && (!to || r.date <= to))
     .sort((a, b) => b.date.localeCompare(a.date))
+
+  // What the rows currently shown add up to: money received, the fees PayPal took, and what is left.
+  const received = rows.filter((r) => r.group === 'incomes').reduce((a, r) => a + r.amount, 0)
+  const feesPaid = rows.reduce((a, r) => a + r.fee, 0)
 
   return (
     <div className="max-w-5xl">
@@ -180,6 +184,14 @@ export function PayPalClient({
         </button>
         <span className="text-sm text-peel-500">{rows.length} record{rows.length === 1 ? '' : 's'}. Click a column header to sort, or use its menu to filter.</span>
       </div>
+
+      {received > 0 && (
+        <div className="no-print mt-3 flex flex-wrap gap-3 text-sm font-bold">
+          <span className="rounded-xl bg-leaf-100 px-3 py-1.5 text-leaf-700">Received {rm(received)}</span>
+          <span className="rounded-xl bg-berry-100 px-3 py-1.5 text-berry-500">PayPal fees -{rm(feesPaid)}</span>
+          <span className="rounded-xl bg-peel-900 px-3 py-1.5 text-white">After fees {rm(received - feesPaid)}</span>
+        </div>
+      )}
 
       <section className={`${card} mt-3 overflow-hidden`}>
         <PayPalGrid key={currentCode()} rows={rows} search={search} printing={printing} onReady={(api) => (gridApi.current = api)} />

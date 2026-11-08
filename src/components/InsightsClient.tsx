@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { insightsAction, removeAiSettingsAction, saveAiSettingsAction } from '@/app/(frontend)/actions'
+import { rm } from '@/lib/dates'
 import type { Insight } from '@/lib/types'
 import { Icon } from './Icon'
 import { btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
@@ -11,6 +12,8 @@ const KINDS: Record<Insight['kind'], { label: string; badge: string }> = {
   saving: { label: 'Saving idea', badge: 'bg-leaf-100 text-leaf-700' },
   subscription: { label: 'Subscription', badge: 'bg-banana-200 text-peel-900' },
   forecast: { label: 'Forecast', badge: 'bg-sky-100 text-sky-700' },
+  fees: { label: 'PayPal fees', badge: 'bg-violet-100 text-violet-700' },
+  clients: { label: 'Clients', badge: 'bg-leaf-100 text-leaf-700' },
 }
 
 type Own = { provider: string; label: string; model: string; hint: string; auth: 'key' | 'google' }
@@ -108,7 +111,50 @@ function AiAccount({ engine, own, serverKey, providers, google }: { engine: stri
   )
 }
 
-export function InsightsClient({ engine, own, serverKey, providers, google }: { engine: string; own: Own | null; serverKey: boolean; providers: { id: string; label: string; model: string }[]; google: Google }) {
+type Clients = { total: number; top: { name: string; amount: number; share: number }[] }
+type Fees = { fees: number; paypalIncome: number; net: number; rate: number }
+
+function Overview({ clients, fees }: { clients: Clients; fees: Fees }) {
+  const lead = clients.top[0]
+  const concentrated = lead && clients.top.length > 1 && lead.share >= 0.5
+  return (
+    <section className={`${card} mb-6 p-5`}>
+      <h2 className="text-lg font-extrabold">Last 90 days at a glance</h2>
+      <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+        <div className="rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">Income</p><p className="text-lg font-extrabold text-leaf-700">{rm(clients.total)}</p></div>
+        <div className="rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">PayPal fees</p><p className="text-lg font-extrabold text-berry-500">-{rm(fees.fees)}</p></div>
+        <div className="rounded-xl bg-peel-900 p-3 text-white"><p className="text-xs font-bold opacity-80">After fees</p><p className="text-lg font-extrabold">{rm(fees.net)}</p></div>
+      </div>
+      {fees.fees > 0 && <p className="mt-2 text-xs text-peel-500">Fees are {(fees.rate * 100).toFixed(1)}% of what you received through PayPal.</p>}
+
+      <h3 className="mt-5 font-extrabold">Income by client</h3>
+      {clients.top.length === 0 ? (
+        <p className="mt-1 text-sm text-peel-500">No income recorded in the last 90 days.</p>
+      ) : (
+        <ul className="mt-2 space-y-2">
+          {clients.top.map((c) => (
+            <li key={c.name}>
+              <div className="flex justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate font-semibold">{c.name}</span>
+                <span className="shrink-0 text-peel-700">{rm(c.amount)} · {Math.round(c.share * 100)}%</span>
+              </div>
+              <div className="mt-1 h-2.5 overflow-hidden rounded-full bg-banana-100">
+                <div className={`h-full rounded-full ${c === lead && concentrated ? 'bg-berry-500' : 'bg-leaf-500'}`} style={{ width: `${Math.max(2, Math.round(c.share * 100))}%` }} />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+      {concentrated && (
+        <p role="status" className="mt-3 rounded-xl bg-berry-100 px-3 py-2 text-sm font-semibold text-berry-500">
+          {Math.round(lead.share * 100)}% of your income comes from {lead.name}. Relying on one client is risky.
+        </p>
+      )}
+    </section>
+  )
+}
+
+export function InsightsClient({ engine, own, serverKey, providers, google, clients, fees }: { engine: string; own: Own | null; serverKey: boolean; providers: { id: string; label: string; model: string }[]; google: Google; clients: Clients; fees: Fees }) {
   const act = useAction()
   const [result, setResult] = useState<{ insights: Insight[]; ai: boolean } | null>(null)
 
@@ -116,11 +162,13 @@ export function InsightsClient({ engine, own, serverKey, providers, google }: { 
     <div className="max-w-3xl">
       <PageTitle icon="sparkle" title="AI Insights" sub="AI reads your PayPal and recorded transactions and points out what stands out." />
 
+      <Overview clients={clients} fees={fees} />
+
       <AiAccount engine={engine} own={own} serverKey={serverKey} providers={providers} google={google} />
 
       <section className={`${card} mb-6 p-5`}>
         <p className="text-sm text-peel-700">
-          This analysis looks at your last 90 days of transactions and your subscriptions. It looks for payments that are out of pattern, ways to spend less, subscriptions worth reviewing, and what next month is likely to look like.
+          This analysis looks at your last 90 days of transactions and your subscriptions. It looks for payments that are out of pattern, ways to spend less, subscriptions worth reviewing, what PayPal fees cost you, how much of your income depends on one client, and what next month is likely to look like.
           Findings cite your real amounts, and nothing is changed in your records.
           {engine === 'built-in planner' ? ' No AI account is connected, so simple built-in rules are used instead.' : ''}
         </p>
@@ -129,7 +177,7 @@ export function InsightsClient({ engine, own, serverKey, providers, google }: { 
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li><b>What it receives.</b> Your recent transactions (date, type, description, amount, and whether PayPal supplied it) and your subscriptions. Up to 150 transactions from the last 90 days are sent. Planned goal funding is left out.</li>
             <li><b>What it does.</b> It analyses the data rather than writing freely: it spots payments that are out of pattern, recurring costs worth reviewing, ways to spend less, and what the next 30 days look like.</li>
-            <li><b>What comes back.</b> A short list of findings in a fixed format. Each one is labelled as unusual spending, a saving idea, a subscription or a forecast. The app checks the format, drops anything malformed, and shows at most six.</li>
+            <li><b>What comes back.</b> A short list of findings in a fixed format. Each one is labelled as unusual spending, a saving idea, a subscription, a forecast, PayPal fees or clients. The totals and client shares are calculated exactly by the app and handed to the AI, so it never has to do the sums itself. The app checks the format, drops anything malformed, and shows at most six.</li>
             <li><b>What it never does.</b> It does not add, edit or delete any of your records, and it is told not to invent transactions.</li>
             <li><b>Privacy and fallback.</b> Data is sent to your configured AI provider only when a key is set on the server. Without one, nothing leaves the app and simple built-in rules produce basic findings instead.</li>
           </ul>

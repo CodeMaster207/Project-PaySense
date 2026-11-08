@@ -4,7 +4,7 @@ import type { Where } from 'payload'
 import { getPayloadClient } from '@/lib/payload'
 import { endAppSession, getAppUser, startAppSession } from '@/lib/app-auth'
 import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from '@/lib/ai-config'
-import { aiCategorize, aiChat, aiInsights, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
+import { aiCategorize, aiChat, aiInsights, aiInvoiceDraft, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
 import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
 import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
@@ -228,6 +228,8 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
             type: t.kind === 'income' ? 'income' : 'expense',
             description: t.business.slice(0, 120),
             amount: Math.abs(t.amount),
+            fee: t.fee,
+            counterparty: t.counterparty || undefined,
             source: 'paypal',
             externalId: t.externalId,
             paypalAccountId: acct.id ?? undefined,
@@ -237,6 +239,16 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
         })
       }
       imported++
+    }
+
+    // Entries imported before fees and clients were tracked: fill them in from PayPal's data.
+    const byId = new Map(txns.map((t) => [t.externalId, t]))
+    const noFee: Where = { and: [{ source: { equals: 'paypal' } }, { fee: { exists: false } }] }
+    const needFee = await payload.find({ collection: 'entries', user, overrideAccess: false, where: noFee, limit: 1000, depth: 0, pagination: false })
+    for (const d of needFee.docs) {
+      const t = d.externalId ? byId.get(d.externalId) : undefined
+      if (!t) continue
+      await payload.update({ collection: 'entries', id: d.id, user, overrideAccess: false, data: { fee: t.fee, counterparty: t.counterparty || undefined } })
     }
 
     // Records imported before accounts were tracked: confirm the ones that belong to this account, and mark the
@@ -300,6 +312,39 @@ export async function deleteForeignPayPalRecordsAction(): Promise<ActionResult<{
 }
 
 // ---------- payment requests ----------
+/** Drafts an invoice from a sentence. Nothing is sent: the user reviews the filled-in form and confirms. */
+export async function draftInvoiceAction(text: string): Promise<
+  ActionResult<{ email: string; amountBase: number; description: string; dueDays: number; shown: string; ai: boolean; missing: string[] }>
+> {
+  try {
+    const user = await requireUser()
+    const typed = String(text ?? '').trim()
+    if (typed.length < 5) return fail('Describe the invoice, for example: invoice Acme RM500 for logo design, due in 14 days.')
+    const { draft, ai } = await aiInvoiceDraft(typed)
+    if (!draft) return fail('I could not find an amount. Try something like: invoice Acme RM500 for logo design, due in 14 days.')
+    // No currency in the text means the one the user normally sees.
+    const currency = draft.currency ?? (user.currency as string | undefined) ?? 'MYR'
+    const fx = (await getRates()).rates[currency]
+    if (!fx) return fail(`I do not have an exchange rate for ${currency}. Use RM, USD, EUR, GBP, SGD, AUD, CNY, INR, THB, JPY or IDR.`)
+    const missing: string[] = []
+    if (!draft.email) missing.push('their PayPal email')
+    return {
+      ok: true,
+      data: {
+        email: draft.email,
+        amountBase: Math.round((draft.amount / fx) * 100) / 100,
+        description: draft.description,
+        dueDays: draft.dueDays,
+        shown: `${currency} ${draft.amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        ai,
+        missing,
+      },
+    }
+  } catch (e) {
+    return fail(msg(e, 'Could not draft the invoice.'))
+  }
+}
+
 export async function requestPaymentAction(input: { email: string; amount: number; description: string; dueDays: number }): Promise<ActionResult> {
   try {
     const user = await requireUser()

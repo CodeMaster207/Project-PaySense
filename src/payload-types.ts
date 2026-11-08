@@ -468,6 +468,8 @@ export interface Entry {
   source?: ('manual' | 'paypal') | null;
   externalId?: string | null;
   paypalAccountId?: string | null;
+  fee?: number | null;
+  counterparty?: string | null;
   originalCurrency?: string | null;
   originalAmount?: number | null;
   createdBy?:
@@ -933,6 +935,8 @@ export interface EntriesSelect<T extends boolean = true> {
   source?: T;
   externalId?: T;
   paypalAccountId?: T;
+  fee?: T;
+  counterparty?: T;
   originalCurrency?: T;
   originalAmount?: T;
   createdBy?: T;
