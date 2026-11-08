@@ -11,7 +11,7 @@ import { DatePicker } from './DatePicker'
 import { Icon } from './Icon'
 import { TagBadge } from './TagColor'
 import { GoalEditor } from './GoalEditor'
-import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { AiNote, btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
 type Suggestion = { title: string; targetAmount: number; months: number; why: string }
 
@@ -72,6 +72,14 @@ export function PlansClient({
   return (
     <div>
       <PageTitle icon="calendar" title="Plan overview" sub="Manage your plans here!" />
+      <AiNote>
+        <ul className="list-disc space-y-1 pl-5">
+          <li><b>Further refine the goal for me.</b> The AI takes your saved plan and breaks it into finer weekly checkpoints. The checkpoints are validated, so every date falls between the start and target date.</li>
+          <li><b>Suggest goals for me.</b> The AI reads a summary of your finances and proposes a few realistic savings goals with an amount, a timeframe and a reason. You choose whether to use one.</li>
+          <li><b>Which goal to edit (AI planner).</b> From the Dashboard, the AI picks the one goal whose change would help your budget most, and explains why.</li>
+        </ul>
+        <p>Calendars, daily amounts and the skip-days you set are ordinary calculations. Without a connected AI account, even splits, fixed suggestions and a "heaviest goal" pick are used instead.</p>
+      </AiNote>
       <div className="mb-4 flex items-center gap-3">
         <span className="font-bold">Date Range:</span>
         <div className="w-48"><DatePicker clearable ariaLabel="From" placeholder="Any date" max={to || undefined} value={from} onChange={setFrom} /></div>

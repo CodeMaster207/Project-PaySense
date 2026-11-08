@@ -29,7 +29,7 @@ export function MonthCalendar({
   const cells = [...Array(lead).fill(null), ...Array.from({ length: count }, (_, i) => i + 1)]
   const t = today()
   return (
-    <div className={sm ? 'w-full max-w-[19rem]' : undefined}>
+    <div className={sm ? 'w-full max-w-[20rem]' : undefined}>
       <div className="mb-2 flex items-center justify-between">
         <h3 className={sm ? 'text-sm font-extrabold' : 'font-extrabold'}>{month.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' })}</h3>
         {onMonth && (

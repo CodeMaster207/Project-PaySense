@@ -14,6 +14,7 @@ const nav: { href: string; label: string; icon: IconName }[] = [
   { href: '/plans', label: 'Plan Page', icon: 'calendar' },
   { href: '/subscriptions', label: 'Subscriptions', icon: 'renew' },
   { href: '/paypal', label: 'PayPal Integration', icon: 'wallet' },
+  { href: '/insights', label: 'AI Insights', icon: 'sparkle' },
 ]
 
 export function Sidebar({ email }: { email: string }) {
@@ -31,9 +32,16 @@ export function Sidebar({ email }: { email: string }) {
   return (
     <aside className={`sticky top-0 flex h-screen shrink-0 flex-col border-r-2 border-banana-300 bg-banana-100 p-4 transition-[width] duration-200 ${collapsed ? 'w-20' : 'w-64'}`}>
       <div className={`mb-8 flex items-center pt-2 ${collapsed ? 'flex-col gap-3' : 'justify-between gap-2 px-2'}`}>
-        <div className="flex items-center gap-2">
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-banana-300 text-peel-900">
-            <Icon name="sparkle" className="size-6" />
+        <div className="flex items-center gap-2 border-b-4 border-banana-400 pb-1.5">
+          <span className="shrink-0 rounded-xl bg-white p-0.5">
+            <img
+              src="/logo.png"
+              alt="PaySense logo"
+              width={32}
+              height={32}
+              className="block size-8 rounded-lg"
+              style={{ imageRendering: 'pixelated' }}
+            />
           </span>
           {!collapsed && <span className="text-xl font-extrabold">PaySense</span>}
         </div>

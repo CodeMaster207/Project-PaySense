@@ -47,6 +47,16 @@ export function Feedback({ error, notice }: { error?: string | null; notice?: st
   )
 }
 
+/** Collapsible note explaining where AI is (and is not) used on a page. */
+export function AiNote({ children, className = '-mt-3 mb-4' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <details className={`rounded-xl border-2 border-banana-200 bg-banana-50 px-4 py-2 text-sm text-peel-700 ${className}`}>
+      <summary className="cursor-pointer font-bold text-peel-900">How is AI used here?</summary>
+      <div className="mt-2 space-y-2">{children}</div>
+    </details>
+  )
+}
+
 export function PageTitle({ icon, title, sub }: { icon: IconName; title: string; sub?: string }) {
   return (
     <header className="mb-6 flex items-center gap-3">

@@ -12,7 +12,7 @@ import { DatePicker } from './DatePicker'
 import { GoalEditor } from './GoalEditor'
 import { currencySymbol, localize, toBase, toDisplay } from '@/lib/money'
 import { MoneyInput } from './MoneyInput'
-import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { AiNote, btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
 export function GoalsClient({ initial, engine }: { initial: { title: string; amount: string; days: number }; engine: string }) {
   const router = useRouter()
@@ -84,6 +84,11 @@ export function GoalsClient({ initial, engine }: { initial: { title: string; amo
   return (
     <div className="max-w-5xl">
       <PageTitle icon="flag" title="Personal AI" sub="Write the goal here!" />
+      <AiNote>
+        <p>You describe a goal (what, how much, by when). The AI turns it into a plan: a daily saving amount, a short summary and dated checkpoints with the cumulative amount saved at each one.</p>
+        <p>The result is checked before you see it: checkpoints must fall between the start and target date, there are at most 60, and the daily amount must be positive. Nothing is saved until you review and confirm, and you can edit any part.</p>
+        <p>Without a connected AI account, a built-in planner divides the amount evenly over the days and adds four milestones.</p>
+      </AiNote>
       <form
         className={`${card} space-y-4 p-6`}
         onSubmit={(e) => {

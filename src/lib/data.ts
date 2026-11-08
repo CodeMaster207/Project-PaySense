@@ -1,7 +1,7 @@
 import 'server-only'
 import { getPayloadClient } from '@/lib/payload'
 import type { getAppUser } from '@/lib/app-auth'
-import type { EntryView, GoalView, JobView, SubscriptionView } from './types'
+import type { EntryView, GoalView, JobView, PaymentRequestView, SubscriptionView } from './types'
 
 type AppUser = NonNullable<Awaited<ReturnType<typeof getAppUser>>>
 
@@ -15,6 +15,8 @@ export async function loadEntries(user: AppUser): Promise<EntryView[]> {
     description: d.description,
     amount: d.amount,
     source: d.source ?? 'manual',
+    ...(d.externalId ? { externalId: d.externalId } : {}),
+    ...(d.originalCurrency && d.originalAmount != null ? { originalCurrency: d.originalCurrency, originalAmount: d.originalAmount } : {}),
   }))
 }
 
@@ -31,6 +33,10 @@ export async function loadSubscriptions(user: AppUser): Promise<SubscriptionView
     status: d.status ?? 'active',
     tag: d.tag ?? '',
     note: d.note ?? '',
+    linked: Boolean(d.externalId),
+    paypalTransactionId: d.externalId ?? '',
+    ...(d.originalCurrency && d.originalAmount != null ? { originalCurrency: d.originalCurrency, originalAmount: d.originalAmount } : {}),
+    paypalCancellable: Boolean(d.paypalSubscriptionId),
   }))
 }
 
@@ -70,10 +76,25 @@ export async function loadJobs(user: AppUser): Promise<JobView[]> {
   return docs.map((d) => ({
     id: String(d.id),
     name: d.name,
+    kind: d.kind ?? 'job',
     amount: d.amount,
     frequency: d.frequency,
     startDate: d.startDate,
     endDate: d.endDate ?? '',
+  }))
+}
+
+export async function loadPaymentRequests(user: AppUser): Promise<PaymentRequestView[]> {
+  const payload = await getPayloadClient()
+  const { docs } = await payload.find({ collection: 'payment-requests', user, overrideAccess: false, limit: 100, sort: '-createdAt', depth: 0 })
+  return docs.map((d) => ({
+    id: String(d.id),
+    email: d.recipientEmail,
+    amount: d.amount,
+    description: d.description,
+    dueDate: d.dueDate ?? '',
+    status: d.status ?? 'sent',
+    invoiceId: d.invoiceId,
   }))
 }
 

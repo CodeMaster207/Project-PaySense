@@ -10,5 +10,5 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
   const user = (await getAppUser())!
   const [goals, entries, jobs] = await Promise.all([loadGoals(user), loadEntries(user), loadJobs(user)])
   const catchUp = Object.fromEntries(goalCatchUp(goals, [...entries, ...jobIncomeEntries(jobs)]).byGoal)
-  return <PlansClient goals={goals} catchUp={catchUp} engine={aiProvider()} initialGoalId={goal ?? null} aiPick={ai === '1' ? { deficit: deficit === '1' } : null} />
+  return <PlansClient goals={goals} catchUp={catchUp} engine={await aiProvider()} initialGoalId={goal ?? null} aiPick={ai === '1' ? { deficit: deficit === '1' } : null} />
 }

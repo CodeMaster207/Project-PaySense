@@ -1,31 +1,220 @@
 import 'server-only'
-import { addDays, daysBetween, rm } from './dates'
-import type { PlanDraft, PlanItem } from './types'
+import { type AiConfig, googleAccessToken, PROVIDERS, resolveAi } from './ai-config'
+import { addDays, daysBetween, rm, today } from './dates'
+import type { EntryView, Insight, PlanDraft, PlanItem, SubscriptionView } from './types'
 
 type Msg = { role: 'system' | 'user' | 'assistant'; content: string }
 
-export const aiProvider = () => (process.env.APP_OPENAI_API_KEY ? 'openai' : 'built-in planner')
+/** Name of the AI in use for the signed-in user, or the built-in fallback. */
+export async function aiProvider() {
+  const cfg = await resolveAi()
+  return cfg ? PROVIDERS[cfg.provider].label : 'built-in planner'
+}
 
-async function llm(messages: Msg[], json = false): Promise<string | null> {
-  const key = process.env.APP_OPENAI_API_KEY
-  if (!key) return null
+const stripFences = (s: string) => s.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
+
+/** One chat request to the configured provider. Fixed provider URLs only, so a user key can never point the server elsewhere. */
+export async function aiRequest(cfg: AiConfig, messages: Msg[], json = false): Promise<{ text: string | null; error?: string }> {
+  const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n')
+  const turns = messages.filter((m) => m.role !== 'system')
+  while (turns.length && turns[0].role === 'assistant') turns.shift()
   try {
-    const res = await fetch(`${process.env.APP_OPENAI_BASE_URL || 'https://api.openai.com/v1'}/chat/completions`, {
+    let res: Response
+    if (cfg.provider === 'anthropic') {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: cfg.model,
+          max_tokens: 4096,
+          system: json ? `${system}\nRespond with a single valid JSON object only, with no other text.` : system,
+          messages: turns.map((m) => ({ role: m.role, content: m.content })),
+        }),
+        cache: 'no-store',
+      })
+      if (!res.ok) return { text: null, error: await providerError(res) }
+      const blocks = ((await res.json()).content ?? []) as { type: string; text?: string }[]
+      const text = blocks.find((b) => b.type === 'text')?.text
+      return { text: text ? (json ? stripFences(text) : text) : null }
+    }
+    if (cfg.provider === 'gemini') {
+      const auth: Record<string, string> = cfg.auth === 'google' ? { Authorization: `Bearer ${await googleAccessToken(cfg.key)}` } : { 'x-goog-api-key': cfg.key }
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(cfg.model)}:generateContent`, {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: system }] },
+          contents: turns.map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+          generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) },
+        }),
+        cache: 'no-store',
+      })
+      if (!res.ok) return { text: null, error: await providerError(res) }
+      const text = ((await res.json()).candidates?.[0]?.content?.parts?.[0]?.text ?? null) as string | null
+      return { text: text && json ? stripFences(text) : text }
+    }
+    res = await fetch(`${cfg.source === 'server' ? process.env.APP_OPENAI_BASE_URL || 'https://api.openai.com/v1' : 'https://api.openai.com/v1'}/chat/completions`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: process.env.APP_OPENAI_MODEL || 'gpt-4o-mini',
-        messages,
-        temperature: 0.4,
-        ...(json ? { response_format: { type: 'json_object' } } : {}),
-      }),
+      headers: { Authorization: `Bearer ${cfg.key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: cfg.model, messages, temperature: 0.4, ...(json ? { response_format: { type: 'json_object' } } : {}) }),
       cache: 'no-store',
     })
-    if (!res.ok) return null
-    return (await res.json()).choices?.[0]?.message?.content ?? null
+    if (!res.ok) return { text: null, error: await providerError(res) }
+    return { text: (await res.json()).choices?.[0]?.message?.content ?? null }
   } catch {
-    return null
+    return { text: null, error: 'Could not reach the AI provider.' }
   }
+}
+
+async function providerError(res: Response) {
+  if (res.status === 401 || res.status === 403) return 'The provider rejected this API key.'
+  if (res.status === 404) return 'The provider does not know that model name.'
+  if (res.status === 429) return 'The provider says this key is out of quota or rate limited.'
+  return `The provider returned an error (${res.status}).`
+}
+
+async function llm(messages: Msg[], json = false): Promise<string | null> {
+  const cfg = await resolveAi()
+  if (!cfg) return null
+  return (await aiRequest(cfg, messages, json)).text
+}
+
+const INSIGHT_KINDS: Insight['kind'][] = ['unusual', 'saving', 'subscription', 'forecast']
+
+function ruleInsights(entries: EntryView[], subs: SubscriptionView[]): Insight[] {
+  const out: Insight[] = []
+  const since = addDays(today(), -30)
+  const recent = entries.filter((e) => e.date >= since && e.date <= today() && e.source !== 'goal')
+  const spend = recent.filter((e) => e.type === 'expense')
+  const biggest = [...spend].sort((a, b) => b.amount - a.amount)[0]
+  if (biggest) out.push({ kind: 'unusual', title: `Largest expense: ${biggest.description}`, detail: `${rm(biggest.amount)} on ${biggest.date}, the biggest single payment in the last 30 days.` })
+  const active = subs.filter((s) => s.status === 'active')
+  if (active.length) {
+    const top = [...active].sort((a, b) => b.amount - a.amount)[0]
+    const total = active.reduce((a, s) => a + s.amount, 0)
+    out.push({ kind: 'subscription', title: `${active.length} active subscription${active.length === 1 ? '' : 's'}`, detail: `${rm(total)} per cycle in total. ${top.name} is the most expensive at ${rm(top.amount)}.` })
+  }
+  const net = recent.filter((e) => e.type === 'income').reduce((a, e) => a + e.amount, 0) - spend.reduce((a, e) => a + e.amount, 0)
+  out.push({ kind: 'forecast', title: net >= 0 ? 'You are saving' : 'You are overspending', detail: `Your last 30 days net to ${net < 0 ? '-' : ''}${rm(Math.abs(net))}. At this pace the next 30 days will look similar.` })
+  return out
+}
+
+/** Finds unusual spending, savings opportunities, subscription waste and a short forecast. AI when a key is set, simple rules otherwise. */
+export async function aiInsights(entries: EntryView[], subs: SubscriptionView[]): Promise<{ insights: Insight[]; ai: boolean }> {
+  const since = addDays(today(), -90)
+  const rows = entries
+    .filter((e) => e.date >= since && e.date <= today() && e.source !== 'goal')
+    .slice(0, 150)
+    .map((e) => ({ date: e.date, type: e.type, what: e.description.slice(0, 60), amount: e.amount, paypal: e.source === 'paypal' }))
+  const text = await llm(
+    [
+      {
+        role: 'system',
+        content:
+          'You analyse a person\'s recent transactions (many come from PayPal) and subscriptions. Find at most 6 specific, useful findings. ' +
+          `Each has kind (one of ${INSIGHT_KINDS.join(', ')}), a short title, and one or two sentences of detail that cite real amounts from the data. ` +
+          'unusual = a payment out of pattern, saving = a concrete way to spend less, subscription = a recurring cost worth reviewing, forecast = what the next month looks like. ' +
+          'Never invent transactions. Reply with JSON: {"insights":[{"kind","title","detail"}]}.',
+      },
+      { role: 'user', content: JSON.stringify({ transactions: rows, subscriptions: subs.map((s) => ({ name: s.name, amount: s.amount, status: s.status, category: s.category })) }) },
+    ],
+    true,
+  )
+  if (text) {
+    try {
+      const raw = (JSON.parse(text) as { insights?: Partial<Insight>[] }).insights ?? []
+      const insights = raw
+        .filter((i) => INSIGHT_KINDS.includes(i.kind as Insight['kind']) && i.title && i.detail)
+        .slice(0, 6)
+        .map((i) => ({ kind: i.kind as Insight['kind'], title: String(i.title).slice(0, 90), detail: String(i.detail).slice(0, 300) }))
+      if (insights.length) return { insights, ai: true }
+    } catch {}
+  }
+  return { insights: ruleInsights(entries, subs), ai: false }
+}
+
+const TXN_CATEGORIES = ['Streaming', 'Software', 'Shopping', 'Utilities', 'Other'] as const
+export type TxnKind = 'income' | 'expense' | 'subscription'
+export type TxnLabel = { kind: TxnKind; category: string }
+
+/** Asks the model to tell recurring subscriptions from one-off spending and to categorise each payment. Returns null without a key or on failure. */
+export async function aiCategorize(txns: { id: string; business: string; amount: number; kind: TxnKind }[]): Promise<Map<string, TxnLabel> | null> {
+  if (txns.length === 0 || !(await resolveAi())) return null
+  const out = new Map<string, TxnLabel>()
+  for (let i = 0; i < txns.length; i += 40) {
+    const batch = txns.slice(i, i + 40)
+    const text = await llm(
+      [
+        {
+          role: 'system',
+          content:
+            `You classify PayPal transactions for a budgeting app. For each item return {"id","kind","category"}. ` +
+            `kind is "subscription" only for recurring paid services (streaming, software, memberships, plans); other money out is "expense"; money in is "income". ` +
+            `category is one of ${TXN_CATEGORIES.join(', ')}. Reply with JSON: {"items":[...]} and nothing else.`,
+        },
+        { role: 'user', content: JSON.stringify(batch.map((t) => ({ id: t.id, merchant: t.business.slice(0, 120), amount: t.amount }))) },
+      ],
+      true,
+    )
+    if (!text) continue
+    try {
+      const items = (JSON.parse(text) as { items?: { id?: string; kind?: string; category?: string }[] }).items ?? []
+      for (const it of items) {
+        const src = batch.find((t) => t.id === it.id)
+        if (!src) continue
+        // Money in stays income; only outgoing payments can be a subscription or an expense.
+        const kind: TxnKind = src.amount > 0 ? 'income' : it.kind === 'subscription' ? 'subscription' : 'expense'
+        const category = TXN_CATEGORIES.find((c) => c === it.category) ?? 'Other'
+        out.set(src.id, { kind, category })
+      }
+    } catch {
+      continue
+    }
+  }
+  return out.size ? out : null
+}
+
+export type MatchCandidate = { id: string; business: string; amount: number; date: string; recurring: boolean }
+type Match = { id: string | null; reason: string; usedAI: boolean }
+
+const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)
+
+function heuristicMatch(sub: { name: string; amount: number }, cands: MatchCandidate[]): Match {
+  let best: { c: MatchCandidate; score: number; why: string } | null = null
+  for (const c of cands) {
+    const nameHit = words(sub.name).some((w) => c.business.toLowerCase().includes(w))
+    const amountHit = Math.abs(Math.abs(c.amount) - sub.amount) < 0.01
+    const score = (nameHit ? 2 : 0) + (amountHit ? 1 : 0) + (c.recurring ? 0.5 : 0)
+    const why = [nameHit && 'the name is similar', amountHit && 'the amount is the same', c.recurring && 'it is a recurring payment'].filter(Boolean).join(', ')
+    if (score >= 1.5 && (!best || score > best.score)) best = { c, score, why }
+  }
+  return best ? { id: best.c.id, reason: `Best match because ${best.why}.`, usedAI: false } : { id: null, reason: 'No PayPal transaction looks like this subscription.', usedAI: false }
+}
+
+/** Picks the PayPal sandbox transaction a newly added subscription most likely corresponds to. */
+export async function matchSubscription(sub: { name: string; category: string; amount: number }, cands: MatchCandidate[]): Promise<Match> {
+  if (cands.length === 0) return { id: null, reason: 'No unlinked outgoing PayPal transactions were found.', usedAI: false }
+  const text = await llm(
+    [
+      {
+        role: 'system',
+        content:
+          'You link a subscription a user added by hand to the PayPal transaction that pays for it. Compare merchant name, amount and whether the payment recurs. ' +
+          'Pick the single best candidate, or null if none plausibly matches. Reply with JSON: {"id": string|null, "reason": "one short sentence"}.',
+      },
+      { role: 'user', content: JSON.stringify({ subscription: sub, candidates: cands.map((c) => ({ id: c.id, merchant: c.business.slice(0, 120), amount: c.amount, date: c.date, recurring: c.recurring })) }) },
+    ],
+    true,
+  )
+  if (text) {
+    try {
+      const r = JSON.parse(text) as { id?: string | null; reason?: string }
+      const reason = String(r.reason ?? '').slice(0, 200) || 'Suggested by AI.'
+      if (r.id === null) return { id: null, reason, usedAI: true }
+      if (r.id && cands.some((c) => c.id === r.id)) return { id: r.id, reason, usedAI: true }
+    } catch {}
+  }
+  return heuristicMatch(sub, cands)
 }
 
 const clampItems = (items: unknown, start: string, end: string): PlanItem[] => {
@@ -126,12 +315,12 @@ export async function aiChat(history: Msg[], context: string): Promise<string> {
     const top = snap.match(/Biggest expenses: (.*)\.$/)?.[1] ?? 'none'
     const gap = rm(Math.abs(bal))
     return bal < 0
-      ? `You are ${gap} short for this period. A quick plan:\n1. Trim your biggest expenses by 10-15% (${top}).\n2. Skip weekends or holidays on your goal on the Plan page, or push its target date out, to lower the daily funding.\n3. Cancel subscriptions you rarely use.\n4. Add income on the Incomes tab, for example a part-time job.\n\nConnect an AI key (APP_OPENAI_API_KEY) for a plan tailored to your exact numbers.`
-      : `You have a ${gap} surplus. A quick plan:\n1. Put about half towards your nearest goal to finish it sooner.\n2. Keep a quarter as an emergency buffer.\n3. Review recurring expenses (${top}) to see what else can be saved.\n\nConnect an AI key (APP_OPENAI_API_KEY) for a plan tailored to your exact numbers.`
+      ? `You are ${gap} short for this period. A quick plan:\n1. Trim your biggest expenses by 10-15% (${top}).\n2. Skip weekends or holidays on your goal on the Plan page, or push its target date out, to lower the daily funding.\n3. Cancel subscriptions you rarely use.\n4. Add income on the Incomes tab, for example a part-time job.\n\nConnect an AI account on the AI Insights page for a plan tailored to your exact numbers.`
+      : `You have a ${gap} surplus. A quick plan:\n1. Put about half towards your nearest goal to finish it sooner.\n2. Keep a quarter as an emergency buffer.\n3. Review recurring expenses (${top}) to see what else can be saved.\n\nConnect an AI account on the AI Insights page for a plan tailored to your exact numbers.`
   }
   const last = raw.toLowerCase()
   if (/subscri/.test(last)) return `Here is what I can see:\n${context.split('\n').filter((l) => /subscription/i.test(l)).join('\n') || 'No subscriptions imported yet - open the PayPal page and sync.'}`
-  return `Quick snapshot of your finances:\n${context}\n\nTip: connect an AI key (APP_OPENAI_API_KEY) for open-ended answers.`
+  return `Quick snapshot of your finances:\n${context}\n\nTip: connect an AI account on the AI Insights page for open-ended answers.`
 }
 
 export async function aiSuggestGoals(context: string): Promise<{ title: string; targetAmount: number; months: number; why: string }[]> {

@@ -39,5 +39,21 @@ export const Users: CollectionConfig = {
       type: 'date',
       access: { create: () => false, update: ({ req }) => req.user?.collection === 'admins' },
     },
+    // AI account the user connected. Written only by the server (overrideAccess); the key is encrypted and never readable through the API.
+    {
+      name: 'aiProvider',
+      type: 'select',
+      options: ['openai', 'anthropic', 'gemini'],
+      access: { create: () => false, update: () => false },
+    },
+    { name: 'aiAuth', type: 'select', options: ['key', 'google'], access: { create: () => false, update: () => false } },
+    { name: 'aiModel', type: 'text', access: { create: () => false, update: () => false } },
+    { name: 'aiKeyHint', type: 'text', access: { create: () => false, update: () => false } },
+    {
+      name: 'aiKeyEnc',
+      type: 'text',
+      access: { create: () => false, read: () => false, update: () => false },
+      admin: { hidden: true },
+    },
   ],
 }

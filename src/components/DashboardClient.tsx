@@ -10,7 +10,7 @@ import { Icon } from './Icon'
 import { MonthCalendar } from './MonthCalendar'
 import { PieChart, type Slice } from './PieChart'
 import { StatGrid } from './StatGrid'
-import { btnGhost, card, PageTitle } from './ui'
+import { AiNote, btnGhost, card, PageTitle } from './ui'
 
 type Period = 'day' | 'month' | 'year'
 type Pie = 'income' | 'out' | 'goal'
@@ -39,6 +39,16 @@ export function DashboardClient({ entries: manual, goals, jobs, subs }: { entrie
   const [period, setPeriod] = useState<Period>('month')
   const [day, setDay] = useState(today())
   const [month, setMonth] = useState(() => parseDay(today()))
+  const [calOpen, setCalOpen] = useState(true)
+  const calRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!calOpen) return
+    const close = (e: MouseEvent) => {
+      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [calOpen])
   const [pieChoice, setPie] = useState<Pie>('out')
   const [hover, setHover] = useState<{ pie: Pie; label: string } | null>(null)
 
@@ -74,6 +84,13 @@ export function DashboardClient({ entries: manual, goals, jobs, subs }: { entrie
   const balance = income - out - goal
   // In a deficit, flag whichever outflow is larger as the main cause.
   const culprit: Pie | null = balance < 0 ? (out >= goal ? 'out' : 'goal') : null
+
+  // All-time account balance (independent of the selected period).
+  const allRows = entries.filter((e) => e.date <= todayKey)
+  const allIncome = sum(group(allRows.filter((r) => r.type === 'income')))
+  const allOut = sum(group(allRows.filter((r) => r.type === 'expense' && r.source !== 'goal'))) + sum(subs.filter((s) => s.status === 'active').map((s) => ({ value: s.amount })))
+  const allGoal = sum(group(allRows.filter((r) => r.source === 'goal'), (e) => e.description.replace(/^Goal: /, '')))
+  const totalBalance = allIncome - allOut - allGoal
   const culpritName = culprit === 'out' ? 'expenses' : 'goal funds'
 
   const slicesOf = (p: Pie) => (p === 'income' ? incomeSlices : p === 'goal' ? goalSlices : outSlices)
@@ -84,8 +101,34 @@ export function DashboardClient({ entries: manual, goals, jobs, subs }: { entrie
   return (
     <div>
       <PageTitle icon="chart" title="Dashboard" sub="Where your money goes. Pick a date on the calendar to move around." />
-      <div className="grid grid-cols-[minmax(0,1fr)_21rem] gap-6">
-        <section className={`${card} flex flex-col p-6`}>
+      <AiNote>
+        <p>The numbers and charts on this page are <b>not</b> produced by AI. Balances, totals, pie slices and deficit warnings are plain calculations on your recorded incomes, expenses and goal funding.</p>
+        <p>AI comes in through the <b>AI planner</b> button at the bottom right. It opens the Plans page, where the AI looks at your finances and picks which savings goal to adjust first, with a short reason, such as moving a target date or skipping weekdays. If no AI account is connected, the goal that takes the most per day is suggested instead.</p>
+      </AiNote>
+
+      <div className={`${card} mb-6 flex flex-wrap items-center justify-between gap-4 p-6`}>
+        <div className="flex items-center gap-4">
+          <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-banana-300 text-peel-900">
+            <Icon name="wallet" className="size-6" />
+          </span>
+          <div>
+            <p className="text-sm font-bold text-peel-700">Account Balance · All time</p>
+            <p className={`text-3xl font-extrabold tracking-tight ${totalBalance >= 0 ? 'text-leaf-700' : 'text-berry-500'}`}>
+              {totalBalance < 0 ? '−' : ''}{rm(Math.abs(totalBalance))}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-3 text-sm font-bold">
+          <span className="rounded-xl bg-leaf-100 px-3 py-1.5 text-leaf-700">+{rm(allIncome)} income</span>
+          <span className="rounded-xl bg-berry-100 px-3 py-1.5 text-berry-500">−{rm(allOut)} expenses</span>
+          {allGoal > 0 && (
+            <span className="rounded-xl bg-banana-100 px-3 py-1.5 text-peel-500">−{rm(allGoal)} goals</span>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-6">
+        <section className={`${card} flex min-w-0 flex-col p-6`}>
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-2xl font-extrabold">{periodLabel}</h2>
             <div role="group" aria-label="Period" className="flex overflow-hidden rounded-xl border-2 border-banana-300 text-sm font-bold">
@@ -132,7 +175,7 @@ export function DashboardClient({ entries: manual, goals, jobs, subs }: { entrie
             <span>{balance >= 0 ? '+' : '-'}{rm(Math.abs(balance))}</span>
           </p>
 
-          <div role="tablist" aria-label="Pie chart" className="mb-3 flex gap-2">
+          <div role="tablist" aria-label="Pie chart" className="mb-3 flex flex-wrap gap-2">
             {(
               [
                 { id: 'out' as const, label: 'Expenses', on: 'border-berry-500 bg-berry-500 text-white', off: 'border-berry-500/40 bg-white text-berry-500 hover:bg-berry-100' },
@@ -224,20 +267,33 @@ export function DashboardClient({ entries: manual, goals, jobs, subs }: { entrie
           )}
         </section>
 
-        <aside className={`${card} h-fit p-4`}>
-          <h2 className="mb-3 font-extrabold">Calendar</h2>
-          <MonthCalendar size="sm" month={month} onMonth={setMonth} selected={day} onSelect={setDay} dayState={(d) => (overspent.has(d) ? 'deficit' : undefined)} />
-          <button
-            type="button"
-            className={`${btnGhost} mt-4 w-full`}
-            onClick={() => {
-              setDay(today())
-              setMonth(parseDay(today()))
-            }}
-          >
-            Jump to today
+        <div ref={calRef} className="relative">
+          <button type="button" aria-label="Show calendar" aria-expanded={calOpen} onClick={() => setCalOpen(true)} className={`${card} flex h-fit flex-col items-center gap-2 px-2 py-3 text-peel-700 hover:bg-banana-100 ${calOpen ? 'invisible' : ''}`}>
+            <Icon name="left" />
+            <Icon name="calendar" className="size-6" />
           </button>
-        </aside>
+          {calOpen && (
+          <aside className={`${card} absolute right-0 top-0 z-30 h-fit w-[21rem] max-w-[calc(100vw-3rem)] p-4 shadow-xl`}>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-extrabold">Calendar</h2>
+              <button type="button" aria-label="Tuck calendar away" aria-expanded onClick={() => setCalOpen(false)} className="grid size-8 place-items-center rounded-lg text-peel-700 hover:bg-banana-100">
+                <Icon name="right" />
+              </button>
+            </div>
+            <MonthCalendar size="sm" month={month} onMonth={setMonth} selected={day} onSelect={setDay} dayState={(d) => (overspent.has(d) ? 'deficit' : undefined)} />
+            <button
+              type="button"
+              className={`${btnGhost} mt-4 w-full`}
+              onClick={() => {
+                setDay(today())
+                setMonth(parseDay(today()))
+              }}
+            >
+              Jump to today
+            </button>
+          </aside>
+          )}
+        </div>
       </div>
 
       <div className="no-print fixed bottom-6 right-6 z-40">

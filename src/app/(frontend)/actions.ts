@@ -2,14 +2,16 @@
 
 import { getPayloadClient } from '@/lib/payload'
 import { endAppSession, getAppUser, startAppSession } from '@/lib/app-auth'
-import { aiChat, aiPickGoal, aiPlan, aiSuggestGoals } from '@/lib/ai'
-import { PayPalUnreachable, categoryFor, checkPayPalConnection, demoTransactions, fetchSandboxTransactions, paypalConfigured } from '@/lib/paypal'
-import { addDays, daysBetween, isDay, today } from '@/lib/dates'
+import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from '@/lib/ai-config'
+import { aiCategorize, aiChat, aiInsights, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
+import { type PayPalTxn, accountCurrency, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
+import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
+import { getRates } from '@/lib/rates'
 import { asTagColor } from '@/lib/tagColors'
 import { dailyFor, fundingDays, WEEKDAYS } from '@/lib/plan'
 import { financeContext, loadEntries, loadGoals, loadSubscriptions } from '@/lib/data'
-import type { ActionResult, GoalEditInput, PlanDraft, PlanItem } from '@/lib/types'
+import type { ActionResult, GoalEditInput, Insight, PayPalMatch, PlanDraft, PlanItem } from '@/lib/types'
 
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error })
 const msg = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback)
@@ -90,6 +92,54 @@ export async function addEntryAction(input: { date: string; type: string; descri
   }
 }
 
+/** Sends the money to a PayPal ID or email from your sandbox account, then records it as an expense. */
+export async function sendPayPalExpenseAction(input: { date: string; description: string; amount: number; recipient: string }): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const description = String(input.description ?? '').trim().slice(0, 120)
+    const recipient = String(input.recipient ?? '').trim()
+    const amount = Math.round(Number(input.amount) * 100) / 100
+    if (!description) return fail('Add a description.')
+    if (!(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient) && recipient.length <= 120) && !/^[A-Z0-9]{13}$/.test(recipient)) {
+      return fail('Enter the recipient\'s PayPal ID (13 letters and numbers) or their PayPal email.')
+    }
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) return fail('Amount must be greater than zero.')
+    if (input.date !== today()) return fail('PayPal payments are sent now, so select today\'s date first.')
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    const currency = (await accountCurrency()) ?? (process.env.PAYPAL_INVOICE_CURRENCY || 'USD').toUpperCase()
+    const fx = (await getRates()).rates[currency]
+    if (!fx) return fail(`The app has no exchange rate for ${currency}, your PayPal account's currency.`)
+    const sent = Math.round(amount * fx * 100) / 100
+    if (sent <= 0) return fail('That amount is too small to send in this currency.')
+    const out = await sendPayout({ recipient, amount: sent, currency, note: description, reference: crypto.randomUUID() })
+    const payload = await getPayloadClient()
+    await payload.create({
+      collection: 'entries',
+      user,
+      overrideAccess: false,
+      data: {
+        owner: user.id,
+        date: input.date,
+        type: 'expense',
+        description,
+        amount,
+        source: 'paypal',
+        externalId: out.transactionId ?? `payout-${out.batchId}`,
+        originalCurrency: currency,
+        originalAmount: sent,
+      },
+    })
+    return {
+      ok: true,
+      message: out.transactionId
+        ? `Sent ${currency} ${sent.toFixed(2)} to ${recipient} and recorded it.`
+        : `Sent ${currency} ${sent.toFixed(2)} to ${recipient} and recorded it. PayPal is still processing it, so a later sync may list it again.`,
+    }
+  } catch (e) {
+    return fail(msg(e, 'Could not send the payment.'))
+  }
+}
+
 export async function deleteEntryAction(id: string): Promise<ActionResult> {
   try {
     const user = await requireUser()
@@ -102,57 +152,47 @@ export async function deleteEntryAction(id: string): Promise<ActionResult> {
 }
 
 // ---------- PayPal ----------
-export async function connectPayPalAction(): Promise<ActionResult<{ mode: 'sandbox' | 'demo' }>> {
+const NO_PAYPAL = 'PayPal sandbox credentials are not set. Add PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET to .env.local and restart the server.'
+
+export async function connectPayPalAction(): Promise<ActionResult<{ mode: 'sandbox' }>> {
   try {
     const user = await requireUser()
-    const mode = paypalConfigured() ? 'sandbox' : 'demo'
-    let note: string | undefined
-    if (mode === 'sandbox') {
-      const check = await checkPayPalConnection()
-      if (!check.ok) {
-        if (!('unreachable' in check) || !check.unreachable) return fail(check.error)
-        note = `${check.error} Demo data will be used instead.`
-      }
-    }
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    const check = await checkPayPalConnection()
+    if (!check.ok) return fail(check.error)
     const payload = await getPayloadClient()
     // Server-owned status field: only this verified server path can set it.
     await payload.update({ collection: 'users', id: user.id, data: { paypalStatus: 'connected' }, overrideAccess: true })
-    return { ok: true, data: { mode }, message: note }
+    return { ok: true, data: { mode: 'sandbox' } }
   } catch (e) {
     return fail(msg(e, 'Could not connect to PayPal.'))
   }
 }
 
-export async function syncPayPalAction(): Promise<ActionResult<{ imported: number; mode: 'sandbox' | 'demo' }>> {
+export async function syncPayPalAction(): Promise<ActionResult<{ imported: number; mode: 'sandbox' }>> {
   try {
     const user = await requireUser()
-    const mode = paypalConfigured() ? 'sandbox' : 'demo'
-    let txns
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    const mode = 'sandbox' as const
+    const txns = await fetchSandboxTransactions(90)
     let note = ''
-    if (mode === 'sandbox') {
-      try {
-        txns = await fetchSandboxTransactions(90)
-      } catch (e) {
-        if (!(e instanceof PayPalUnreachable)) throw e
-        txns = demoTransactions()
-        note = ` ${e.message} Imported demo data instead.`
-      }
-    } else {
-      txns = demoTransactions()
-    }
     const payload = await getPayloadClient()
     let imported = 0
+    // Skip transactions already imported, whichever collection they landed in.
+    const fresh = []
     for (const t of txns) {
-      const collection = t.kind === 'subscription' ? 'subscriptions' : 'entries'
-      const existing = await payload.find({
-        collection,
-        user,
-        overrideAccess: false,
-        where: { externalId: { equals: t.externalId } },
-        limit: 1,
-        depth: 0,
-      })
-      if (existing.totalDocs) continue
+      const found = await Promise.all(
+        (['subscriptions', 'entries'] as const).map((collection) =>
+          payload.find({ collection, user, overrideAccess: false, where: { externalId: { equals: t.externalId } }, limit: 1, depth: 0 }),
+        ),
+      )
+      if (!found.some((r) => r.totalDocs)) fresh.push(t)
+    }
+    const labels = await aiCategorize(fresh.map((t) => ({ id: t.externalId, business: t.business, amount: t.amount, kind: t.kind })))
+    if (labels) note += ` AI categorised ${labels.size} transaction${labels.size === 1 ? '' : 's'}.`
+    for (const raw of fresh) {
+      const label = labels?.get(raw.externalId)
+      const t = label ? { ...raw, kind: label.kind } : raw
       if (t.kind === 'subscription') {
         await payload.create({
           collection: 'subscriptions',
@@ -161,13 +201,16 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
           data: {
             owner: user.id,
             name: t.business.slice(0, 80),
-            category: categoryFor(t.business) as 'Other',
+            category: (label?.category ?? categoryFor(t.business)) as 'Other',
             amount: Math.abs(t.amount),
             renewDate: t.status === 'active' ? addDays(t.date, 30) : undefined,
             terminationDate: t.status === 'cancelled' ? t.date : undefined,
             status: t.status,
             source: 'paypal',
             externalId: t.externalId,
+            paypalSubscriptionId: t.subscriptionId,
+            originalCurrency: t.currency,
+            originalAmount: Math.abs(t.originalAmount),
           },
         })
       } else {
@@ -183,6 +226,8 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
             amount: Math.abs(t.amount),
             source: 'paypal',
             externalId: t.externalId,
+            originalCurrency: t.currency,
+            originalAmount: Math.abs(t.originalAmount),
           },
         })
       }
@@ -200,8 +245,60 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
   }
 }
 
+// ---------- payment requests ----------
+export async function requestPaymentAction(input: { email: string; amount: number; description: string; dueDays: number }): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const email = String(input.email ?? '').trim().toLowerCase()
+    const description = String(input.description ?? '').trim().slice(0, 120)
+    const amount = Math.round(Number(input.amount) * 100) / 100
+    const dueDays = Math.min(90, Math.max(0, Math.floor(Number(input.dueDays) || 0)))
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 120) return fail('Enter the PayPal email of the person you are requesting from.')
+    if (!description) return fail('Say what the payment is for.')
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000) return fail('Enter an amount greater than zero.')
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    const dueDate = addDays(today(), dueDays)
+    // PayPal only lets a merchant invoice in a currency its account can receive, so use the account's own and convert from the RM base.
+    const currency = (await accountCurrency()) ?? (process.env.PAYPAL_INVOICE_CURRENCY || 'USD').toUpperCase()
+    const fx = (await getRates()).rates[currency]
+    if (!fx) return fail(`The app has no exchange rate for ${currency}, your PayPal account's currency.`)
+    const invoiceAmount = Math.round(amount * fx * 100) / 100
+    if (invoiceAmount <= 0) return fail('That amount is too small to invoice in this currency.')
+    const { id } = await sendPaymentRequest({ email, amount: invoiceAmount, currency, description, dueDate })
+    const payload = await getPayloadClient()
+    await payload.create({
+      collection: 'payment-requests',
+      overrideAccess: true,
+      data: { owner: user.id, recipientEmail: email, amount, description, dueDate, invoiceId: id, status: 'sent' },
+    })
+    return { ok: true, message: `Payment request for ${currency} ${invoiceAmount.toFixed(2)} (${rm(amount)}) sent to ${email}.` }
+  } catch (e) {
+    return fail(msg(e, 'Could not send the payment request.'))
+  }
+}
+
+export async function refreshPaymentRequestsAction(): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    const payload = await getPayloadClient()
+    const { docs } = await payload.find({ collection: 'payment-requests', user, overrideAccess: false, where: { status: { equals: 'sent' } }, limit: 100, depth: 0 })
+    let paid = 0
+    for (const d of docs) {
+      const status = await paymentRequestStatus(d.invoiceId)
+      if (status === d.status) continue
+      await payload.update({ collection: 'payment-requests', id: d.id, overrideAccess: true, data: { status } })
+      if (status === 'paid') paid++
+    }
+    return { ok: true, message: paid ? `${paid} request${paid === 1 ? ' was' : 's were'} paid. Resync on the PayPal page to import the payment.` : 'No new payments yet.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not check your payment requests.'))
+  }
+}
+
 // ---------- jobs ----------
 export async function addJobAction(input: {
+  kind?: string
   name: string
   amount: number
   frequency: string
@@ -215,7 +312,9 @@ export async function addJobAction(input: {
     const frequency = ['daily', 'weekly', 'biweekly', 'monthly', 'yearly'].find((f) => f === input.frequency) as
       | 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly' | undefined
     const endDate = input.endDate ? String(input.endDate) : ''
-    if (!name) return fail('Give the job a name.')
+    const kind = input.kind === 'contract' ? 'contract' : 'job'
+    if (!name) return fail(`Give the ${kind} a name.`)
+    if (kind === 'contract' && !endDate) return fail('A contract needs an end date.')
     if (!Number.isFinite(amount) || amount <= 0) return fail('Income must be greater than zero.')
     if (!frequency) return fail('Choose how often you are paid.')
     if (!isDay(input.startDate)) return fail('Pick a valid start date.')
@@ -225,9 +324,9 @@ export async function addJobAction(input: {
       collection: 'jobs',
       user,
       overrideAccess: false,
-      data: { owner: user.id, name, amount, frequency, startDate: input.startDate, endDate: endDate || undefined },
+      data: { owner: user.id, kind, name, amount, frequency, startDate: input.startDate, endDate: endDate || undefined },
     })
-    return { ok: true, message: `Job "${name}" added.` }
+    return { ok: true, message: `${kind === 'contract' ? 'Contract' : 'Job'} "${name}" added.` }
   } catch (e) {
     return fail(msg(e, 'Could not save the job.'))
   }
@@ -420,6 +519,106 @@ export async function archiveGoalAction(id: string): Promise<ActionResult> {
 }
 
 // ---------- subscriptions ----------
+export async function createSubscriptionAction(input: {
+  name: string
+  category: string
+  amount: number
+  renewDate?: string
+  status: 'active' | 'cancelled'
+}): Promise<ActionResult<{ id: string }>> {
+  if (!input.name?.trim()) return fail('Name is required.')
+  const amount = Number(input.amount)
+  if (!Number.isFinite(amount) || amount <= 0) return fail('Enter a valid amount greater than 0.')
+  const categories = ['Streaming', 'Software', 'Shopping', 'Utilities', 'Other']
+  if (!categories.includes(input.category)) return fail('Invalid category.')
+  try {
+    const user = await requireUser()
+    const payload = await getPayloadClient()
+    const created = await payload.create({
+      collection: 'subscriptions',
+      user,
+      overrideAccess: false,
+      data: {
+        owner: user.id,
+        name: input.name.trim().slice(0, 80),
+        category: input.category as 'Other',
+        amount,
+        status: input.status,
+        renewDate: input.status === 'active' && input.renewDate ? input.renewDate : undefined,
+        terminationDate: input.status === 'cancelled' ? today() : undefined,
+        source: 'manual',
+      },
+    })
+    return { ok: true, data: { id: String(created.id) }, message: 'Subscription added.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not create the subscription.'))
+  }
+}
+
+/** Outgoing PayPal transactions that have not been imported or linked yet. */
+async function unlinkedPayPalCandidates(user: NonNullable<Awaited<ReturnType<typeof getAppUser>>>) {
+  if (!paypalConfigured()) throw new Error(NO_PAYPAL)
+  const mode = 'sandbox' as const
+  const txns: PayPalTxn[] = await fetchSandboxTransactions(90)
+  const out = txns.filter((t) => t.amount < 0)
+  const payload = await getPayloadClient()
+  const where = { externalId: { in: out.map((t) => t.externalId) } }
+  const [subs, entries] = await Promise.all([
+    payload.find({ collection: 'subscriptions', user, overrideAccess: false, where, limit: 500, depth: 0, pagination: false }),
+    payload.find({ collection: 'entries', user, overrideAccess: false, where, limit: 500, depth: 0, pagination: false }),
+  ])
+  const used = new Set([...subs.docs, ...entries.docs].map((d) => d.externalId))
+  return { mode, cands: out.filter((t) => !used.has(t.externalId)) }
+}
+
+export async function suggestPayPalMatchAction(id: string): Promise<ActionResult<{ match: PayPalMatch | null; note: string }>> {
+  try {
+    const user = await requireUser()
+    const payload = await getPayloadClient()
+    const sub = await payload.findByID({ collection: 'subscriptions', id, user, overrideAccess: false, depth: 0 })
+    if (sub.externalId) return { ok: true, data: { match: null, note: 'This subscription is already linked to PayPal.' } }
+    const { mode, cands } = await unlinkedPayPalCandidates(user)
+    const r = await matchSubscription(
+      { name: sub.name, category: sub.category ?? 'Other', amount: sub.amount },
+      cands.map((t) => ({ id: t.externalId, business: t.business, amount: t.amount, date: t.date, recurring: t.kind === 'subscription' })),
+    )
+    const t = r.id ? cands.find((c) => c.externalId === r.id) : undefined
+    if (!t) return { ok: true, data: { match: null, note: r.reason } }
+    return {
+      ok: true,
+      data: {
+        match: { externalId: t.externalId, business: t.business, amount: Math.abs(t.amount), date: t.date, hasSubscriptionId: Boolean(t.subscriptionId), reason: r.reason, ai: r.usedAI, mode },
+        note: r.reason,
+      },
+    }
+  } catch (e) {
+    return fail(msg(e, 'Could not search the PayPal sandbox.'))
+  }
+}
+
+export async function linkSubscriptionAction(id: string, externalId: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const payload = await getPayloadClient()
+    const sub = await payload.findByID({ collection: 'subscriptions', id, user, overrideAccess: false, depth: 0 })
+    if (sub.externalId) return fail('This subscription is already linked to PayPal.')
+    // Look the transaction up again on the server so a PayPal subscription ID can never come from the browser.
+    const { cands } = await unlinkedPayPalCandidates(user)
+    const t = cands.find((c) => c.externalId === externalId)
+    if (!t) return fail('That PayPal transaction is no longer available to link.')
+    await payload.update({
+      collection: 'subscriptions',
+      id,
+      user,
+      overrideAccess: false,
+      data: { source: 'paypal', externalId: t.externalId, paypalSubscriptionId: t.subscriptionId },
+    })
+    return { ok: true, message: t.subscriptionId ? 'Linked. Cancelling it here will also cancel it in PayPal.' : 'Linked to the PayPal transaction.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not link the subscription.'))
+  }
+}
+
 export async function updateSubscriptionAction(id: string, patch: { tag?: string; note?: string; status?: string }): Promise<ActionResult> {
   try {
     const user = await requireUser()
@@ -431,14 +630,87 @@ export async function updateSubscriptionAction(id: string, patch: { tag?: string
       data.terminationDate = patch.status === 'cancelled' ? today() : ''
     }
     const payload = await getPayloadClient()
+    let note: string | undefined
+    if (patch.status === 'cancelled') {
+      const sub = await payload.findByID({ collection: 'subscriptions', id, user, overrideAccess: false, depth: 0 })
+      if (sub.source === 'paypal' && sub.status === 'active') {
+        if (sub.paypalSubscriptionId && paypalConfigured()) {
+          try {
+            await cancelPayPalSubscription(sub.paypalSubscriptionId, 'Cancelled from PaySense')
+            note = 'Cancelled here and in the PayPal sandbox.'
+          } catch (e) {
+            note = `Cancelled here, but PayPal was not cancelled: ${msg(e, 'request failed')}.`
+          }
+        } else {
+          note = 'Cancelled here only: this subscription has no PayPal subscription ID to cancel.'
+        }
+      }
+    }
     await payload.update({ collection: 'subscriptions', id, user, overrideAccess: false, data })
-    return { ok: true }
+    return { ok: true, message: note }
   } catch (e) {
     return fail(msg(e, 'Could not update the subscription.'))
   }
 }
 
 // ---------- AI ----------
+/** If the user is signed in with Google for Gemini, revoke that grant before it is replaced or removed. */
+async function revokeStoredGoogle(userId: string | number) {
+  const payload = await getPayloadClient()
+  const doc = await payload.findByID({ collection: 'users', id: userId, overrideAccess: true, depth: 0 })
+  if (doc.aiAuth === 'google' && doc.aiKeyEnc) {
+    try {
+      await revokeGoogleToken(decryptKey(doc.aiKeyEnc))
+    } catch {}
+  }
+}
+
+export async function saveAiSettingsAction(input: { provider: string; model: string; key: string }): Promise<ActionResult<{ label: string }>> {
+  try {
+    const user = await requireUser()
+    if (!isProvider(input.provider)) return fail('Choose OpenAI, Claude or Gemini.')
+    const key = String(input.key ?? '').trim()
+    if (key.length < 20 || key.length > 400 || /\s/.test(key)) return fail('That does not look like an API key. Paste the full key from your provider.')
+    const model = String(input.model ?? '').trim() || PROVIDERS[input.provider].model
+    if (!/^[A-Za-z0-9._:-]{1,80}$/.test(model)) return fail('Model names can only use letters, numbers and . _ : -')
+    const test = await aiRequest({ provider: input.provider, key, model, source: 'user', auth: 'key' }, [{ role: 'user', content: 'Reply with the single word: ok' }])
+    if (!test.text) return fail(test.error ?? 'The provider did not answer. Check the key and model.')
+    await revokeStoredGoogle(user.id)
+    const payload = await getPayloadClient()
+    await payload.update({
+      collection: 'users',
+      id: user.id,
+      overrideAccess: true,
+      data: { aiProvider: input.provider, aiAuth: 'key', aiModel: model, aiKeyHint: key.slice(-4), aiKeyEnc: encryptKey(key) },
+    })
+    return { ok: true, data: { label: PROVIDERS[input.provider].label }, message: `${PROVIDERS[input.provider].label} connected.` }
+  } catch (e) {
+    return fail(msg(e, 'Could not save the AI account.'))
+  }
+}
+
+export async function removeAiSettingsAction(): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    await revokeStoredGoogle(user.id)
+    const payload = await getPayloadClient()
+    await payload.update({ collection: 'users', id: user.id, overrideAccess: true, data: { aiProvider: null, aiAuth: null, aiModel: null, aiKeyHint: null, aiKeyEnc: null } })
+    return { ok: true, message: 'AI account removed.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not remove the AI account.'))
+  }
+}
+
+export async function insightsAction(): Promise<ActionResult<{ insights: Insight[]; ai: boolean }>> {
+  try {
+    const user = await requireUser()
+    const [entries, subs] = await Promise.all([loadEntries(user), loadSubscriptions(user)])
+    return { ok: true, data: await aiInsights(entries, subs) }
+  } catch (e) {
+    return fail(msg(e, 'Could not analyse your spending.'))
+  }
+}
+
 async function context() {
   const user = await requireUser()
   const [e, s, g] = await Promise.all([loadEntries(user), loadSubscriptions(user), loadGoals(user)])

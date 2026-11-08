@@ -13,6 +13,7 @@ import { Goals } from './collections/Goals'
 import { Entries } from './collections/Entries'
 import { Subscriptions } from './collections/Subscriptions'
 import { Jobs } from './collections/Jobs'
+import { PaymentRequests } from './collections/PaymentRequests'
 
 const filename = fileURLToPath(import.meta.url)
 const dirname = path.dirname(filename)
@@ -43,7 +44,7 @@ export default buildConfig({
     fallbackLanguage: 'en',
     supportedLanguages: { 'en': adminLanguage },
   },
-  collections: [Admins, Media, Folders, Tags, Users, Goals, Entries, Subscriptions, Jobs],
+  collections: [Admins, Media, Folders, Tags, Users, Goals, Entries, Subscriptions, Jobs, PaymentRequests],
   typescript: {
     outputFile: path.resolve(dirname, 'payload-types.ts'),
   },

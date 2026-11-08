@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { CURRENCIES, currencySymbol, rate, rateOrigin, toBase } from '@/lib/money'
-import { setCurrencyAction, addEntryAction, deleteEntryAction, syncPayPalAction } from '@/app/(frontend)/actions'
+import { setCurrencyAction, addEntryAction, deleteEntryAction, sendPayPalExpenseAction, syncPayPalAction } from '@/app/(frontend)/actions'
 import { addDays, daysBetween, parseDay, prettyDay, rm, today } from '@/lib/dates'
 import { isSkipped } from '@/lib/plan'
 import { jobIncomeEntries } from '@/lib/jobs'
@@ -14,13 +14,23 @@ import { MoneyInput } from './MoneyInput'
 import { MonthCalendar } from './MonthCalendar'
 import { StatGrid } from './StatGrid'
 import { PersonalAI } from './PersonalAI'
-import { btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { AiNote, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
 export function Ledger({ entries: manual, goals, jobs, engine, email, paypalMode, currency }: {
   currency: string; entries: EntryView[]; goals: GoalView[]; jobs: JobView[]; engine: string; email: string; paypalMode: string }) {
   const [day, setDay] = useState(today())
   const [month, setMonth] = useState(() => parseDay(today()))
   const [settings, setSettings] = useState(false)
+  const [calOpen, setCalOpen] = useState(true)
+  const calRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!calOpen) return
+    const close = (e: MouseEvent) => {
+      if (calRef.current && !calRef.current.contains(e.target as Node)) setCalOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [calOpen])
   const act = useAction()
   const jobIncomes = jobIncomeEntries(jobs)
   const entries = [...manual, ...plannedEntries(goals, [...manual, ...jobIncomes]), ...jobIncomes]
@@ -32,15 +42,62 @@ export function Ledger({ entries: manual, goals, jobs, engine, email, paypalMode
   const goalFunds = entries.filter((e) => e.date === day && e.source === 'goal')
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_22rem] gap-6">
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
       <div>
         <PageTitle icon="home" title="Expenditures" sub="Pick a date in the calendar to see and log its incomes and expenditures." />
+        <AiNote>
+          <p>This page mixes plain calculations with two AI features.</p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li><b>Personal AI chat (generative).</b> It answers your questions using a snapshot of your own data: balance, biggest expenses, subscriptions and goals.</li>
+            <li><b>Import from PayPal (classification).</b> New PayPal transactions are sent to the AI, which decides whether money out is a subscription or a one-off expense and files subscriptions under a category.</li>
+            <li><b>Not AI.</b> Daily totals, balances, the red deficit days on the calendar and goal funding are ordinary calculations on your records.</li>
+          </ul>
+          <p>AI needs an account you connect on the AI Insights page (OpenAI, Claude or Gemini). Without one, the chat gives a basic summary and the import falls back to simple keyword rules.</p>
+        </AiNote>
+        <div ref={calRef} className="relative mb-3 flex justify-end">
+          <button
+            type="button"
+            aria-label="Show calendar"
+            aria-expanded={calOpen}
+            onClick={() => setCalOpen(true)}
+            className={`${card} flex items-center gap-2 px-3 py-2 font-bold text-peel-700 hover:bg-banana-100 ${calOpen ? 'invisible' : ''}`}
+          >
+            <Icon name="calendar" className="size-6" /> Calendar
+          </button>
+          {calOpen && (
+            <section className={`${card} absolute right-0 top-0 z-30 w-[22rem] max-w-full p-4 shadow-xl`}>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="font-extrabold">Calendar</h2>
+                <button type="button" aria-label="Tuck calendar away" aria-expanded onClick={() => setCalOpen(false)} className="grid size-8 place-items-center rounded-lg text-peel-700 hover:bg-banana-100">
+                  <Icon name="right" />
+                </button>
+              </div>
+              <MonthCalendar
+                size="sm"
+                dayState={(d) => (overspent.has(d) ? 'deficit' : undefined)}
+                month={month}
+                onMonth={setMonth}
+                selected={day}
+                onSelect={setDay}
+              />
+            </section>
+          )}
+        </div>
         <div className={`${card} relative min-h-[34rem] p-6`}>
           <DayPanel day={day} entries={dayEntries.filter((e) => e.type === 'expense')} act={act} />
 
-          <div className="mt-8 flex flex-wrap items-start justify-between gap-4">
-            <IncomesCard day={day} rows={dayEntries.filter((e) => e.type === 'income')} />
-            <GoalFunds day={day} rows={goalFunds} outstanding={outstanding} />
+          <div className="@container mt-8">
+          <div className="grid grid-cols-1 items-start gap-6 @2xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
+            <div className="flex min-w-0 flex-col gap-4">
+              <h3 className="text-xl font-bold">Income</h3>
+              <InflowCard day={day} rows={dayEntries.filter((e) => e.type === 'income' && e.source !== 'job')} act={act} />
+              <IncomesCard day={day} rows={dayEntries.filter((e) => e.type === 'income' && e.source === 'job')} />
+            </div>
+            <div className="flex w-full min-w-0 flex-col gap-4">
+              <h3 className="text-right text-xl font-bold">Goals</h3>
+              <GoalFunds day={day} rows={goalFunds} outstanding={outstanding} />
+            </div>
+          </div>
           </div>
 
           <DayTotals entries={dayEntries} goalFunds={goalFunds} />
@@ -93,18 +150,7 @@ export function Ledger({ entries: manual, goals, jobs, engine, email, paypalMode
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-4rem)] flex-col gap-4">
-        <section className={`${card} p-4`}>
-          <h2 className="mb-3 font-extrabold">Calendar</h2>
-          <MonthCalendar
-            size="sm"
-            dayState={(d) => (overspent.has(d) ? 'deficit' : undefined)}
-            month={month}
-            onMonth={setMonth}
-            selected={day}
-            onSelect={setDay}
-          />
-        </section>
+      <div className="flex min-h-[40rem] flex-col gap-4 xl:h-[calc(100vh-4rem)]">
         <PersonalAI engine={engine} className="flex-1" />
       </div>
     </div>
@@ -118,9 +164,9 @@ function GoalFunds({ day, rows, outstanding }: { day: string; rows: EntryView[];
   // Shortfall warnings only matter for today; other days just show the amounts.
   const isToday = day === today()
   return (
-    <section aria-label="Goal funds" className="ml-auto w-full max-w-sm self-start rounded-xl border-2 border-banana-300 bg-banana-50">
+    <section aria-label="Funds" className="w-full self-start rounded-xl border-2 border-banana-300 bg-banana-50">
       <h3 className="flex items-baseline justify-between border-b-2 border-banana-200 bg-banana-100 px-4 py-2 font-extrabold">
-        <span className="flex items-center gap-2"><Icon name="flag" className="size-4" /> Goal funds</span>
+        <span className="flex items-center gap-2"><Icon name="flag" className="size-4" /> Funds</span>
         <span className="text-sm text-peel-500">{total > 0 ? '-' : ''}{rm(total)}</span>
       </h3>
       <ul className="divide-y divide-banana-100">
@@ -140,11 +186,41 @@ function GoalFunds({ day, rows, outstanding }: { day: string; rows: EntryView[];
   )
 }
 
-/** View-only incomes for the selected day; recording happens on the Incomes tab. */
+/** Inflow card: refunds, manual transfers, PayPal income — editable inline. */
+function InflowCard({ day, rows, act }: { day: string; rows: EntryView[]; act: ReturnType<typeof useAction> }) {
+  const total = rows.reduce((a, e) => a + e.amount, 0)
+  return (
+    <section aria-label="Inflow" className="w-full min-w-0 overflow-hidden rounded-xl border-2 border-banana-300 bg-banana-50">
+      <h3 className="flex items-baseline justify-between border-b-2 border-banana-200 bg-banana-100 px-4 py-2 font-extrabold">
+        <span className="flex items-center gap-2"><Icon name="income" className="size-4" /> Inflow</span>
+        <span className="text-sm text-leaf-700">{total > 0 ? '+' : ''}{rm(total)}</span>
+      </h3>
+      <ul className="divide-y divide-banana-100">
+        {rows.length === 0 && <li className="px-4 py-3 text-sm text-peel-500">No inflow on {prettyDay(day)}.</li>}
+        {rows.map((e) => (
+          <li key={e.id} className="flex items-start gap-3 px-4 py-2.5">
+            <span className="mt-1.5 h-3 w-6 shrink-0 rounded-full bg-leaf-500" />
+            <span className="min-w-0 flex-1 break-words font-semibold">{e.description}</span>
+            <div className="flex shrink-0 items-center gap-2">
+              {e.source === 'paypal' && <span className="rounded-full bg-banana-200 px-2 text-xs font-bold">PayPal</span>}
+              <span className="font-bold text-leaf-700">+{rm(e.amount)}</span>
+              <button type="button" aria-label={`Delete ${e.description}`} className="text-peel-500 hover:text-berry-500" onClick={() => act.run(() => deleteEntryAction(e.id))}>
+                <Icon name="delete" className="size-5" />
+              </button>
+            </div>
+          </li>
+        ))}
+        <AddRow type="income" day={day} act={act} />
+      </ul>
+    </section>
+  )
+}
+
+/** View-only job income for the selected day; managed on the Jobs tab. */
 function IncomesCard({ day, rows }: { day: string; rows: EntryView[] }) {
   const total = rows.reduce((a, e) => a + e.amount, 0)
   return (
-    <section aria-label="Incomes" className="w-full max-w-sm self-start rounded-xl border-2 border-banana-300 bg-banana-50">
+    <section aria-label="Incomes" className="w-full rounded-xl border-2 border-banana-300 bg-banana-50">
       <h3 className="flex items-baseline justify-between border-b-2 border-banana-200 bg-banana-100 px-4 py-2 font-extrabold">
         <span className="flex items-center gap-2"><Icon name="income" className="size-4" /> Incomes</span>
         <span className="text-sm text-leaf-700">{total > 0 ? '+' : ''}{rm(total)}</span>
@@ -155,8 +231,7 @@ function IncomesCard({ day, rows }: { day: string; rows: EntryView[] }) {
           <li key={e.id} className="flex items-center gap-3 px-4 py-2.5">
             <span className="h-3 w-6 rounded-full bg-leaf-500" />
             <span className="flex-1 font-semibold">{e.description}</span>
-            {e.source === 'paypal' && <span className="rounded-full bg-banana-200 px-2 text-xs font-bold">PayPal</span>}
-            {e.source === 'job' && <span className="rounded-full bg-leaf-100 px-2 text-xs font-bold text-leaf-700">Job</span>}
+            <span className="rounded-full bg-leaf-100 px-2 text-xs font-bold text-leaf-700">Job</span>
             <span className="font-bold text-leaf-700">+{rm(e.amount)}</span>
           </li>
         ))}
@@ -181,7 +256,7 @@ function DayTotals({ entries, goalFunds }: { entries: EntryView[]; goalFunds: En
       <StatGrid
         valueClass="text-base"
         items={[
-          { label: 'Incomes', value: `+${rm(income)}`, tone: 'text-leaf-700' },
+          { label: 'Income', value: `+${rm(income)}`, tone: 'text-leaf-700' },
           { label: 'Expenditures', value: `-${rm(expense)}`, tone: 'text-berry-500' },
           { label: 'Goal funds', value: `${goal > 0 ? '-' : ''}${rm(goal)}`, tone: 'text-peel-500' },
           { label: 'Balance', value: `${net < 0 ? '-' : ''}${rm(Math.abs(net))}`, cell: 'bg-peel-900 text-white' },
@@ -253,20 +328,46 @@ function DayPanel({ day, entries, act }: { day: string; entries: EntryView[]; ac
 function AddRow({ type, day, act }: { type: 'income' | 'expense'; day: string; act: ReturnType<typeof useAction> }) {
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
+  const [mode, setMode] = useState<'standalone' | 'paypal'>('standalone')
+  const [recipient, setRecipient] = useState('')
+  const group = useId()
+  const viaPayPal = type === 'expense' && mode === 'paypal'
   return (
     <li>
       <form
-        className="flex items-center gap-3 px-4 py-2.5"
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5"
         onSubmit={(e) => {
           e.preventDefault()
-          act.run(() => addEntryAction({ date: day, type, description, amount: toBase(Number(amount)) }))
+          if (viaPayPal) act.run(() => sendPayPalExpenseAction({ date: day, description, amount: toBase(Number(amount)), recipient }))
+          else act.run(() => addEntryAction({ date: day, type, description, amount: toBase(Number(amount)) }))
         }}
       >
-        <button aria-label={`Add ${type}`} className="grid size-8 place-items-center rounded-lg bg-banana-300 hover:bg-banana-400">
+        <button aria-label={viaPayPal ? 'Send via PayPal and add expense' : `Add ${type}`} disabled={act.pending} className="grid size-8 place-items-center rounded-lg bg-banana-300 hover:bg-banana-400 disabled:opacity-60">
           <Icon name="add" />
         </button>
         <input className="min-w-0 flex-1 !py-1.5" placeholder="Description..." value={description} onChange={(e) => setDescription(e.target.value)} required />
-        <MoneyInput className="w-36" inputClassName="!py-1.5" placeholder="Amount...." step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        <MoneyInput className="w-28 shrink-0" inputClassName="!py-1.5" placeholder="Amount...." step="0.01" min="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+        {type === 'expense' && (
+          <div className="basis-full space-y-2 sm:pl-11">
+            <div role="radiogroup" aria-label="How is this paid?" className="flex flex-wrap gap-x-5 gap-y-1 text-sm font-semibold">
+              <label className="flex items-center gap-2">
+                <input type="radio" name={group} className="accent-[var(--color-banana-500)]" checked={mode === 'standalone'} onChange={() => setMode('standalone')} />
+                Standalone expense
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name={group} className="accent-[var(--color-banana-500)]" checked={mode === 'paypal'} onChange={() => setMode('paypal')} />
+                Send via PayPal ID
+              </label>
+            </div>
+            {viaPayPal && (
+              <>
+                <input className="w-full !py-1.5" placeholder="Recipient PayPal ID or email" maxLength={120} value={recipient} onChange={(e) => setRecipient(e.target.value)} required />
+                <p className="text-xs text-peel-500">Sends sandbox money from your PayPal account right now (only for today), then records it here as an expense.</p>
+                <Feedback error={act.error} notice={act.notice} />
+              </>
+            )}
+          </div>
+        )}
       </form>
     </li>
   )

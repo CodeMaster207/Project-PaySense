@@ -16,7 +16,7 @@ const title = makeSiteSettings.title ?? defaultTitle
 const description =
   makeSiteSettings.description ??
   "Built with Next.js, Payload CMS, and Tailwind CSS"
-const favicon = makeSiteSettings.icons?.icon ?? "/favicon.svg"
+const favicon = makeSiteSettings.icons?.icon ?? "/logo.png"
 const socialImage = makeSiteSettings.openGraph?.image
 const googleAnalyticsId = sanitizeHtmlAttribute(
   makeSiteSettings.analytics?.googleAnalyticsId,

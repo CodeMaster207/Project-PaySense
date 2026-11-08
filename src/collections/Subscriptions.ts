@@ -23,5 +23,8 @@ export const Subscriptions: CollectionConfig = {
     { name: 'note', type: 'textarea' },
     { name: 'source', type: 'select', defaultValue: 'manual', options: ['manual', 'paypal'] },
     { name: 'externalId', type: 'text', index: true },
+    { name: 'paypalSubscriptionId', type: 'text' },
+    { name: 'originalCurrency', type: 'text' },
+    { name: 'originalAmount', type: 'number' },
   ],
 }

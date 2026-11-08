@@ -89,6 +89,7 @@ export interface Config {
     entries: Entry;
     subscriptions: Subscription;
     jobs: Job;
+    'payment-requests': PaymentRequest;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -106,6 +107,7 @@ export interface Config {
     entries: EntriesSelect<false> | EntriesSelect<true>;
     subscriptions: SubscriptionsSelect<false> | SubscriptionsSelect<true>;
     jobs: JobsSelect<false> | JobsSelect<true>;
+    'payment-requests': PaymentRequestsSelect<false> | PaymentRequestsSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -113,7 +115,7 @@ export interface Config {
     'payload-llm-instructions': PayloadLlmInstructionsSelect<false> | PayloadLlmInstructionsSelect<true>;
   };
   db: {
-    defaultIDType: string;
+    defaultIDType: number;
   };
   fallbackLocale: ('false' | 'none' | 'null') | false | null | 'en' | 'en'[];
   globals: {};
@@ -173,32 +175,43 @@ export interface UserAuthOperations {
  * via the `definition` "admins".
  */
 export interface Admin {
-  id: string;
-  figmaHandle?: string | null;
-  figmaImageUrl?: string | null;
-  userGroups?: string[] | null;
-  makePermission?: ('view' | 'edit') | null;
-  email?: string | null;
+  id: number;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
+  email: string;
+  resetPasswordToken?: string | null;
+  resetPasswordExpiration?: string | null;
+  salt?: string | null;
+  hash?: string | null;
+  resetPasswordRequestedAt?: string | null;
+  loginAttempts?: number | null;
+  lockUntil?: string | null;
+  sessions?:
+    | {
+        id: string;
+        createdAt?: string | null;
+        expiresAt: string;
+      }[]
+    | null;
+  password?: string | null;
   collection: 'admins';
 }
 /**
@@ -206,28 +219,33 @@ export interface Admin {
  * via the `definition` "users".
  */
 export interface User {
-  id: string;
+  id: number;
   name?: string | null;
   currency?: ('MYR' | 'USD' | 'EUR' | 'GBP' | 'SGD' | 'AUD' | 'CNY' | 'INR' | 'THB' | 'JPY' | 'IDR') | null;
   paypalStatus?: ('disconnected' | 'connected') | null;
   paypalLastSync?: string | null;
+  aiProvider?: ('openai' | 'anthropic' | 'gemini') | null;
+  aiAuth?: ('key' | 'google') | null;
+  aiModel?: string | null;
+  aiKeyHint?: string | null;
+  aiKeyEnc?: string | null;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -254,29 +272,27 @@ export interface User {
  * via the `definition` "media".
  */
 export interface Media {
-  id: string;
+  id: number;
   alt: string;
-  _h_folders?: (string | null) | Folder;
-  _h_tags?: (string | Tag)[] | null;
-  prefix?: string | null;
-  _objectKey?: string | null;
+  _h_folders?: (number | null) | Folder;
+  _h_tags?: (number | Tag)[] | null;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -305,26 +321,26 @@ export interface Media {
  * via the `definition` "folders".
  */
 export interface Folder {
-  id: string;
-  _h_folders?: (string | null) | Folder;
+  id: number;
+  _h_folders?: (number | null) | Folder;
   name: string;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -336,26 +352,26 @@ export interface Folder {
  * via the `definition` "tags".
  */
 export interface Tag {
-  id: string;
-  _h_tags?: (string | null) | Tag;
+  id: number;
+  _h_tags?: (number | null) | Tag;
   name: string;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -367,8 +383,8 @@ export interface Tag {
  * via the `definition` "goals".
  */
 export interface Goal {
-  id: string;
-  owner: string | User;
+  id: number;
+  owner: number | User;
   title: string;
   targetDate: string;
   startDate: string;
@@ -420,20 +436,20 @@ export interface Goal {
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -443,31 +459,33 @@ export interface Goal {
  * via the `definition` "entries".
  */
 export interface Entry {
-  id: string;
-  owner: string | User;
+  id: number;
+  owner: number | User;
   date: string;
   type: 'income' | 'expense';
   description: string;
   amount: number;
   source?: ('manual' | 'paypal') | null;
   externalId?: string | null;
+  originalCurrency?: string | null;
+  originalAmount?: number | null;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -477,8 +495,8 @@ export interface Entry {
  * via the `definition` "subscriptions".
  */
 export interface Subscription {
-  id: string;
-  owner: string | User;
+  id: number;
+  owner: number | User;
   name: string;
   category?: ('Streaming' | 'Software' | 'Shopping' | 'Utilities' | 'Other') | null;
   amount: number;
@@ -489,23 +507,26 @@ export interface Subscription {
   note?: string | null;
   source?: ('manual' | 'paypal') | null;
   externalId?: string | null;
+  paypalSubscriptionId?: string | null;
+  originalCurrency?: string | null;
+  originalAmount?: number | null;
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -515,9 +536,10 @@ export interface Subscription {
  * via the `definition` "jobs".
  */
 export interface Job {
-  id: string;
-  owner: string | User;
+  id: number;
+  owner: number | User;
   name: string;
+  kind?: ('job' | 'contract') | null;
   amount: number;
   frequency: 'daily' | 'weekly' | 'biweekly' | 'monthly' | 'yearly';
   startDate: string;
@@ -528,20 +550,54 @@ export interface Job {
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment-requests".
+ */
+export interface PaymentRequest {
+  id: number;
+  owner: number | User;
+  recipientEmail: string;
+  amount: number;
+  description: string;
+  dueDate?: string | null;
+  invoiceId: string;
+  status?: ('sent' | 'paid' | 'cancelled') | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: number | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: number | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: number | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -551,7 +607,7 @@ export interface Job {
  * via the `definition` "payload-kv".
  */
 export interface PayloadKv {
-  id: string;
+  id: number;
   key: string;
   data:
     | {
@@ -568,53 +624,57 @@ export interface PayloadKv {
  * via the `definition` "payload-locked-documents".
  */
 export interface PayloadLockedDocument {
-  id: string;
+  id: number;
   document?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'media';
-        value: string | Media;
+        value: number | Media;
       } | null)
     | ({
         relationTo: 'folders';
-        value: string | Folder;
+        value: number | Folder;
       } | null)
     | ({
         relationTo: 'tags';
-        value: string | Tag;
+        value: number | Tag;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null)
     | ({
         relationTo: 'goals';
-        value: string | Goal;
+        value: number | Goal;
       } | null)
     | ({
         relationTo: 'entries';
-        value: string | Entry;
+        value: number | Entry;
       } | null)
     | ({
         relationTo: 'subscriptions';
-        value: string | Subscription;
+        value: number | Subscription;
       } | null)
     | ({
         relationTo: 'jobs';
-        value: string | Job;
+        value: number | Job;
+      } | null)
+    | ({
+        relationTo: 'payment-requests';
+        value: number | PaymentRequest;
       } | null);
   globalSlug?: string | null;
   user:
     | {
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       }
     | {
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       };
   updatedAt: string;
   createdAt: string;
@@ -624,15 +684,15 @@ export interface PayloadLockedDocument {
  * via the `definition` "payload-preferences".
  */
 export interface PayloadPreference {
-  id: string;
+  id: number;
   user:
     | {
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       }
     | {
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       };
   key?: string | null;
   value?:
@@ -652,7 +712,7 @@ export interface PayloadPreference {
  * via the `definition` "payload-migrations".
  */
 export interface PayloadMigration {
-  id: string;
+  id: number;
   name?: string | null;
   batch?: number | null;
   updatedAt: string;
@@ -672,20 +732,20 @@ export interface PayloadLlmInstruction {
   createdBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedBy?:
     | ({
         relationTo: 'admins';
-        value: string | Admin;
+        value: number | Admin;
       } | null)
     | ({
         relationTo: 'users';
-        value: string | User;
+        value: number | User;
       } | null);
   updatedAt: string;
   createdAt: string;
@@ -695,15 +755,25 @@ export interface PayloadLlmInstruction {
  * via the `definition` "admins_select".
  */
 export interface AdminsSelect<T extends boolean = true> {
-  figmaHandle?: T;
-  figmaImageUrl?: T;
-  userGroups?: T;
-  makePermission?: T;
-  email?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
   createdAt?: T;
+  email?: T;
+  resetPasswordToken?: T;
+  resetPasswordExpiration?: T;
+  salt?: T;
+  hash?: T;
+  resetPasswordRequestedAt?: T;
+  loginAttempts?: T;
+  lockUntil?: T;
+  sessions?:
+    | T
+    | {
+        id?: T;
+        createdAt?: T;
+        expiresAt?: T;
+      };
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
@@ -713,8 +783,6 @@ export interface MediaSelect<T extends boolean = true> {
   alt?: T;
   _h_folders?: T;
   _h_tags?: T;
-  prefix?: T;
-  _objectKey?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -778,6 +846,11 @@ export interface UsersSelect<T extends boolean = true> {
   currency?: T;
   paypalStatus?: T;
   paypalLastSync?: T;
+  aiProvider?: T;
+  aiAuth?: T;
+  aiModel?: T;
+  aiKeyHint?: T;
+  aiKeyEnc?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -857,6 +930,8 @@ export interface EntriesSelect<T extends boolean = true> {
   amount?: T;
   source?: T;
   externalId?: T;
+  originalCurrency?: T;
+  originalAmount?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -878,6 +953,9 @@ export interface SubscriptionsSelect<T extends boolean = true> {
   note?: T;
   source?: T;
   externalId?: T;
+  paypalSubscriptionId?: T;
+  originalCurrency?: T;
+  originalAmount?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -890,10 +968,28 @@ export interface SubscriptionsSelect<T extends boolean = true> {
 export interface JobsSelect<T extends boolean = true> {
   owner?: T;
   name?: T;
+  kind?: T;
   amount?: T;
   frequency?: T;
   startDate?: T;
   endDate?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "payment-requests_select".
+ */
+export interface PaymentRequestsSelect<T extends boolean = true> {
+  owner?: T;
+  recipientEmail?: T;
+  amount?: T;
+  description?: T;
+  dueDate?: T;
+  invoiceId?: T;
+  status?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;
@@ -983,7 +1079,16 @@ export interface CollectionQueryWidget {
   data?: {
     title?: string | null;
     relatedCollection:
-      'admins' | 'media' | 'folders' | 'tags' | 'users' | 'goals' | 'entries' | 'subscriptions' | 'jobs';
+      | 'admins'
+      | 'media'
+      | 'folders'
+      | 'tags'
+      | 'users'
+      | 'goals'
+      | 'entries'
+      | 'subscriptions'
+      | 'jobs'
+      | 'payment-requests';
     where?:
       | {
           [k: string]: unknown;
@@ -1006,7 +1111,19 @@ export interface CollectionQueryWidget {
 export interface ActivityWidget {
   data?: {
     excludedCollections?:
-      ('admins' | 'media' | 'folders' | 'tags' | 'users' | 'goals' | 'entries' | 'subscriptions' | 'jobs')[] | null;
+      | (
+          | 'admins'
+          | 'media'
+          | 'folders'
+          | 'tags'
+          | 'users'
+          | 'goals'
+          | 'entries'
+          | 'subscriptions'
+          | 'jobs'
+          | 'payment-requests'
+        )[]
+      | null;
   };
   width: 'small' | 'medium' | 'large' | 'x-large' | 'full';
 }

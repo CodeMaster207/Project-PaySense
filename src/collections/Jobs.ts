@@ -9,6 +9,7 @@ export const Jobs: CollectionConfig = {
   fields: [
     ownerField,
     { name: 'name', type: 'text', required: true },
+    { name: 'kind', type: 'select', defaultValue: 'job', options: ['job', 'contract'] },
     { name: 'amount', type: 'number', required: true, min: 0.01 },
     {
       name: 'frequency',

@@ -1,9 +1,11 @@
 import { getAppUser } from '@/lib/app-auth'
-import { loadEntries, loadJobs } from '@/lib/data'
+import { loadEntries, loadJobs, loadPaymentRequests } from '@/lib/data'
 import { IncomesClient } from '@/components/IncomesClient'
 
 export default async function IncomesPage() {
   const user = (await getAppUser())!
-  const [entries, jobs] = await Promise.all([loadEntries(user), loadJobs(user)])
-  return <IncomesClient incomes={entries.filter((e) => e.type === 'income')} jobs={jobs} />
+  const [entries, jobs, requests] = await Promise.all([loadEntries(user), loadJobs(user), loadPaymentRequests(user)])
+  // Exclude PayPal-sourced entries (refunds etc.) — those appear on the dashboard only.
+  const incomes = entries.filter((e) => e.type === 'income' && e.source !== 'paypal')
+  return <IncomesClient incomes={incomes} jobs={jobs} requests={requests} />
 }
