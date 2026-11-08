@@ -90,6 +90,7 @@ export interface Config {
     subscriptions: Subscription;
     jobs: Job;
     'payment-requests': PaymentRequest;
+    tasks: Task;
     'payload-kv': PayloadKv;
     'payload-locked-documents': PayloadLockedDocument;
     'payload-preferences': PayloadPreference;
@@ -108,6 +109,7 @@ export interface Config {
     subscriptions: SubscriptionsSelect<false> | SubscriptionsSelect<true>;
     jobs: JobsSelect<false> | JobsSelect<true>;
     'payment-requests': PaymentRequestsSelect<false> | PaymentRequestsSelect<true>;
+    tasks: TasksSelect<false> | TasksSelect<true>;
     'payload-kv': PayloadKvSelect<false> | PayloadKvSelect<true>;
     'payload-locked-documents': PayloadLockedDocumentsSelect<false> | PayloadLockedDocumentsSelect<true>;
     'payload-preferences': PayloadPreferencesSelect<false> | PayloadPreferencesSelect<true>;
@@ -224,6 +226,7 @@ export interface User {
   currency?: ('MYR' | 'USD' | 'EUR' | 'GBP' | 'SGD' | 'AUD' | 'CNY' | 'INR' | 'THB' | 'JPY' | 'IDR') | null;
   paypalStatus?: ('disconnected' | 'connected') | null;
   paypalLastSync?: string | null;
+  autopayLimit?: number | null;
   aiProvider?: ('openai' | 'anthropic' | 'gemini') | null;
   aiAuth?: ('key' | 'google') | null;
   aiModel?: string | null;
@@ -608,6 +611,46 @@ export interface PaymentRequest {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tasks".
+ */
+export interface Task {
+  id: number;
+  owner: number | User;
+  title: string;
+  payeeName: string;
+  payeeContact: string;
+  amount: number;
+  status?: ('open' | 'review' | 'held' | 'paying' | 'paid') | null;
+  deliveryNote?: string | null;
+  verdict?: ('pay' | 'hold') | null;
+  reason?: string | null;
+  reviewedByAi?: boolean | null;
+  paidVia?: ('autopay' | 'approved' | 'override') | null;
+  paidDate?: string | null;
+  payoutRef?: string | null;
+  createdBy?:
+    | ({
+        relationTo: 'admins';
+        value: number | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: number | User;
+      } | null);
+  updatedBy?:
+    | ({
+        relationTo: 'admins';
+        value: number | Admin;
+      } | null)
+    | ({
+        relationTo: 'users';
+        value: number | User;
+      } | null);
+  updatedAt: string;
+  createdAt: string;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv".
  */
 export interface PayloadKv {
@@ -669,6 +712,10 @@ export interface PayloadLockedDocument {
     | ({
         relationTo: 'payment-requests';
         value: number | PaymentRequest;
+      } | null)
+    | ({
+        relationTo: 'tasks';
+        value: number | Task;
       } | null);
   globalSlug?: string | null;
   user:
@@ -850,6 +897,7 @@ export interface UsersSelect<T extends boolean = true> {
   currency?: T;
   paypalStatus?: T;
   paypalLastSync?: T;
+  autopayLimit?: T;
   aiProvider?: T;
   aiAuth?: T;
   aiModel?: T;
@@ -1005,6 +1053,29 @@ export interface PaymentRequestsSelect<T extends boolean = true> {
 }
 /**
  * This interface was referenced by `Config`'s JSON-Schema
+ * via the `definition` "tasks_select".
+ */
+export interface TasksSelect<T extends boolean = true> {
+  owner?: T;
+  title?: T;
+  payeeName?: T;
+  payeeContact?: T;
+  amount?: T;
+  status?: T;
+  deliveryNote?: T;
+  verdict?: T;
+  reason?: T;
+  reviewedByAi?: T;
+  paidVia?: T;
+  paidDate?: T;
+  payoutRef?: T;
+  createdBy?: T;
+  updatedBy?: T;
+  updatedAt?: T;
+  createdAt?: T;
+}
+/**
+ * This interface was referenced by `Config`'s JSON-Schema
  * via the `definition` "payload-kv_select".
  */
 export interface PayloadKvSelect<T extends boolean = true> {
@@ -1096,7 +1167,8 @@ export interface CollectionQueryWidget {
       | 'entries'
       | 'subscriptions'
       | 'jobs'
-      | 'payment-requests';
+      | 'payment-requests'
+      | 'tasks';
     where?:
       | {
           [k: string]: unknown;
@@ -1130,6 +1202,7 @@ export interface ActivityWidget {
           | 'subscriptions'
           | 'jobs'
           | 'payment-requests'
+          | 'tasks'
         )[]
       | null;
   };

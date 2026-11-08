@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { createSubscriptionAction, linkSubscriptionAction, suggestPayPalMatchAction, updateSubscriptionAction } from '@/app/(frontend)/actions'
 import { prettyDay, rm, today } from '@/lib/dates'
@@ -151,7 +151,19 @@ const terminationDateOf = (s: SubscriptionView) => s.terminationDate
 export function SubscriptionsClient({ subs }: { subs: SubscriptionView[] }) {
   const [id, setId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const sel = subs.find((s) => s.id === id) ?? subs[0] ?? null
+  // Nothing is selected until the user picks a subscription, and the info panel only exists while one is.
+  const sel = subs.find((s) => s.id === id) ?? null
+  const infoRef = useRef<HTMLElement>(null)
+  const selId = sel?.id
+  useEffect(() => {
+    if (!selId) return
+    // Clicking anywhere outside the panel closes it. Clicking another row selects that one right after.
+    const close = (e: MouseEvent) => {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) setId(null)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [selId])
   const act = useAction()
   const active = subs.filter((s) => s.status === 'active')
   const cancelled = subs.filter((s) => s.status === 'cancelled')
@@ -190,7 +202,7 @@ export function SubscriptionsClient({ subs }: { subs: SubscriptionView[] }) {
       {!adding && subs.length === 0 && (
         <p className={`${card} mb-6 p-4`}>No subscriptions yet. <Link href="/paypal" className="font-bold underline">Sync PayPal</Link> to detect recurring payments, or add one manually above.</p>
       )}
-      <div className="grid grid-cols-[minmax(0,1fr)_24rem] gap-6">
+      <div className="relative">
         <div className="space-y-6">
           <section>
             <h2 className="mb-2 text-xl font-extrabold">Active Subscriptions</h2>
@@ -208,10 +220,17 @@ export function SubscriptionsClient({ subs }: { subs: SubscriptionView[] }) {
           </section>
         </div>
 
-        <section className={`${card} h-fit overflow-hidden`}>
-          <h2 className="border-b-2 border-banana-200 bg-banana-100 px-4 py-2 text-center font-extrabold">App / Service Info</h2>
-          {sel ? <Info key={sel.id} sub={sel} act={act} /> : <p className="p-6 text-center text-sm text-peel-500">Select a subscription.</p>}
-        </section>
+        {sel && (
+          <section ref={infoRef} aria-label="App / Service Info" className={`${card} absolute right-0 top-0 z-30 w-[24rem] max-w-full overflow-hidden shadow-xl`}>
+            <h2 className="flex items-center justify-between border-b-2 border-banana-200 bg-banana-100 px-4 py-2 font-extrabold">
+              <span>App / Service Info</span>
+              <button type="button" aria-label="Close" className="grid size-7 place-items-center rounded-lg text-peel-700 hover:bg-banana-200" onClick={() => setId(null)}>
+                <Icon name="close" className="size-5" />
+              </button>
+            </h2>
+            <Info key={sel.id} sub={sel} act={act} />
+          </section>
+        )}
       </div>
 
       <section className={`${card} mt-6 p-6`}>

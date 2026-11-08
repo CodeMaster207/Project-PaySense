@@ -72,6 +72,23 @@ export type GoalView = PlanDraft & {
   tagColor: string
 }
 
+export type TaskView = {
+  id: string
+  title: string
+  payeeName: string
+  payeeContact: string
+  /** RM. */
+  amount: number
+  /** open: waiting for the work. review: the agent cleared it and waits for you. held: not cleared. paying: being sent. paid: done. */
+  status: 'open' | 'review' | 'held' | 'paying' | 'paid'
+  deliveryNote: string
+  verdict: 'pay' | 'hold' | null
+  reason: string
+  reviewedByAi: boolean
+  paidVia: 'autopay' | 'approved' | 'override' | null
+  paidDate: string
+}
+
 export type PaymentRequestView = {
   id: string
   email: string

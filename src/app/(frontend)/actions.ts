@@ -6,7 +6,8 @@ import { endAppSession, getAppUser, startAppSession } from '@/lib/app-auth'
 import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from '@/lib/ai-config'
 import { buildMonthReport } from '@/lib/report'
 import { loadForecast } from '@/lib/forecast-input'
-import { aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
+import { AUTOPAY_HARD_CAP, canAutopay, isPayeeContact, TASK_MAX } from '@/lib/task-review'
+import { aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiRequest, aiReviewTask, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
 import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
 import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
@@ -310,6 +311,163 @@ export async function deleteForeignPayPalRecordsAction(): Promise<ActionResult<{
     return { ok: true, data: { deleted }, message: `Deleted ${deleted} record${deleted === 1 ? '' : 's'} from the other PayPal account.` }
   } catch (e) {
     return fail(msg(e, 'Could not delete those records.'))
+  }
+}
+
+// ---------- pay when the work is done ----------
+/** A task that belongs to the signed-in user. Tasks are written only here, so ownership is checked by hand. */
+async function ownedTask(user: Awaited<ReturnType<typeof requireUser>>, id: string) {
+  const payload = await getPayloadClient()
+  const task = await payload.findByID({ collection: 'tasks', id, overrideAccess: true, depth: 0 })
+  if (String(task.owner) !== String(user.id)) throw new Error('Task not found.')
+  return { payload, task }
+}
+
+/**
+ * Sends the money for a task and records it as an expense. Every safety check is here, in code, so the AI cannot
+ * change them. The task is locked as "paying" first, and the PayPal batch ID is derived from the task so the same
+ * task can never be paid twice.
+ */
+async function payTask(user: Awaited<ReturnType<typeof requireUser>>, id: string, how: 'autopay' | 'approved' | 'override'): Promise<ActionResult> {
+  const { payload, task } = await ownedTask(user, id)
+  // A payment stuck as "paying" for over five minutes (for example the server stopped) can be tried again. The PayPal
+  // batch ID is tied to the task, so if the first attempt did go through, PayPal refuses the repeat.
+  const stuck = task.status === 'paying' && Date.now() - new Date(task.updatedAt).getTime() > 5 * 60_000
+  if (task.status === 'paid') return fail('This task is already paid.')
+  if (task.status === 'paying' && !stuck) return fail('This payment is already being sent.')
+  if (!isPayeeContact(task.payeeContact)) return fail('This payee has no valid PayPal email or ID. Delete the task and add it again.')
+  if (!Number.isFinite(task.amount) || task.amount <= 0 || task.amount > TASK_MAX) return fail('This task has an invalid amount.')
+  if (!paypalConfigured()) return fail(NO_PAYPAL)
+  const before = task.status ?? 'open'
+  await payload.update({ collection: 'tasks', id, overrideAccess: true, data: { status: 'paying' } })
+  try {
+    const currency = (await accountCurrency()) ?? (process.env.PAYPAL_INVOICE_CURRENCY || 'USD').toUpperCase()
+    const fx = (await getRates()).rates[currency]
+    if (!fx) throw new Error(`The app has no exchange rate for ${currency}, your PayPal account's currency.`)
+    const sent = Math.round(task.amount * fx * 100) / 100
+    if (sent <= 0) throw new Error('That amount is too small to send in this currency.')
+    const out = await sendPayout({ recipient: task.payeeContact, amount: sent, currency, note: task.title, reference: `paysense-task-${id}` })
+    await payload.create({
+      collection: 'entries',
+      user,
+      overrideAccess: false,
+      data: {
+        owner: user.id,
+        date: today(),
+        type: 'expense',
+        description: `Task: ${task.title} (${task.payeeName})`.slice(0, 120),
+        amount: task.amount,
+        source: 'paypal',
+        externalId: out.transactionId ?? `payout-${out.batchId}`,
+        paypalAccountId: (await accountInfo()).id ?? undefined,
+        originalCurrency: currency,
+        originalAmount: sent,
+      },
+    })
+    await payload.update({ collection: 'tasks', id, overrideAccess: true, data: { status: 'paid', paidVia: how, paidDate: today(), payoutRef: out.transactionId ?? out.batchId } })
+    return { ok: true, message: `Paid ${task.payeeName} ${currency} ${sent.toFixed(2)} for "${task.title}".` }
+  } catch (e) {
+    // Nothing was sent, so put the task back where it was and let the user retry.
+    await payload.update({ collection: 'tasks', id, overrideAccess: true, data: { status: before } })
+    return fail(msg(e, 'Could not send the payment.'))
+  }
+}
+
+export async function addTaskAction(input: { title: string; payeeName: string; payeeContact: string; amount: number }): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const title = String(input.title ?? '').trim().slice(0, 100)
+    const payeeName = String(input.payeeName ?? '').trim().slice(0, 60)
+    const payeeContact = String(input.payeeContact ?? '').trim()
+    const amount = Math.round(Number(input.amount) * 100) / 100
+    if (!title) return fail('Say what the work is.')
+    if (!payeeName) return fail('Add the name of the person you will pay.')
+    if (!isPayeeContact(payeeContact)) return fail('Enter their PayPal email, or their 13-character PayPal ID.')
+    if (!Number.isFinite(amount) || amount <= 0 || amount > TASK_MAX) return fail('Enter an amount greater than zero.')
+    const payload = await getPayloadClient()
+    await payload.create({ collection: 'tasks', overrideAccess: true, data: { owner: user.id, title, payeeName, payeeContact, amount, status: 'open' } })
+    return { ok: true, message: `Task added. Mark it done when ${payeeName} delivers.` }
+  } catch (e) {
+    return fail(msg(e, 'Could not add the task.'))
+  }
+}
+
+/** The agent reviews the delivery note, then either pays (if you allowed it for this size), proposes, or holds. */
+export async function completeTaskAction(id: string, note: string): Promise<ActionResult<{ outcome: 'paid' | 'review' | 'held' }>> {
+  try {
+    const user = await requireUser()
+    const { payload, task } = await ownedTask(user, id)
+    if (task.status !== 'open' && task.status !== 'held') return fail('This task is not waiting for work to be marked done.')
+    const deliveryNote = String(note ?? '').trim().slice(0, 1000)
+    if (!deliveryNote) return fail('Describe what was delivered so the agent can check it.')
+    const review = await aiReviewTask({ title: task.title, note: deliveryNote })
+    await payload.update({
+      collection: 'tasks',
+      id,
+      overrideAccess: true,
+      data: { deliveryNote, verdict: review.verdict, reason: review.reason, reviewedByAi: review.ai, status: review.verdict === 'pay' ? 'review' : 'held' },
+    })
+    const limit = Number((user as { autopayLimit?: number }).autopayLimit ?? 0)
+    if (canAutopay({ limit, amount: task.amount, verdict: review.verdict })) {
+      const paid = await payTask(user, id, 'autopay')
+      return paid.ok ? { ok: true, data: { outcome: 'paid' }, message: `${review.reason} ${paid.message ?? ''}`.trim() } : paid
+    }
+    return review.verdict === 'pay'
+      ? { ok: true, data: { outcome: 'review' }, message: `Cleared by the agent: ${review.reason} Approve below to send the payment.` }
+      : { ok: true, data: { outcome: 'held' }, message: `Held by the agent: ${review.reason}` }
+  } catch (e) {
+    return fail(msg(e, 'Could not review the task.'))
+  }
+}
+
+/** You approve a cleared payment, or pay a held one anyway. Either way the money only moves because you pressed it. */
+export async function approveTaskAction(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const { task } = await ownedTask(user, id)
+    if (task.status !== 'review' && task.status !== 'held' && task.status !== 'paying') return fail('This task is not waiting for approval.')
+    return await payTask(user, id, task.status === 'held' ? 'override' : 'approved')
+  } catch (e) {
+    return fail(msg(e, 'Could not send the payment.'))
+  }
+}
+
+export async function holdTaskAction(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const { payload, task } = await ownedTask(user, id)
+    if (task.status !== 'review') return fail('Only a payment waiting for approval can be held.')
+    await payload.update({ collection: 'tasks', id, overrideAccess: true, data: { status: 'held', verdict: 'hold', reason: 'You held this payment.' } })
+    return { ok: true, message: 'Payment held. Nothing was sent.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not hold the payment.'))
+  }
+}
+
+export async function deleteTaskAction(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const { payload, task } = await ownedTask(user, id)
+    if (task.status === 'paying') return fail('This payment is being sent. Try again in a moment.')
+    await payload.delete({ collection: 'tasks', id, overrideAccess: true })
+    return { ok: true, message: task.status === 'paid' ? 'Task removed. The payment itself stays in your expenses.' : 'Task removed.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not remove the task.'))
+  }
+}
+
+/** The largest task (RM) the agent may pay without asking. 0 switches autopay off. Capped no matter what is typed. */
+export async function setAutopayLimitAction(limit: number): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const value = Math.round(Number(limit) * 100) / 100
+    if (!Number.isFinite(value) || value < 0) return fail('Enter 0 to switch autopay off, or an amount.')
+    if (value > AUTOPAY_HARD_CAP) return fail(`Autopay is limited to ${rm(AUTOPAY_HARD_CAP)} per task. Larger payments always need your approval.`)
+    const payload = await getPayloadClient()
+    await payload.update({ collection: 'users', id: user.id, overrideAccess: true, data: { autopayLimit: value } })
+    return { ok: true, message: value === 0 ? 'Autopay is off. The agent will always ask you first.' : `Autopay is on for tasks up to ${rm(value)}.` }
+  } catch (e) {
+    return fail(msg(e, 'Could not save the autopay limit.'))
   }
 }
 

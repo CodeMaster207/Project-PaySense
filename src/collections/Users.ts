@@ -39,6 +39,8 @@ export const Users: CollectionConfig = {
       type: 'date',
       access: { create: () => false, update: ({ req }) => req.user?.collection === 'admins' },
     },
+    // Largest task (RM) the payments agent may pay without asking. 0 means it always asks first. Server-set only.
+    { name: 'autopayLimit', type: 'number', min: 0, defaultValue: 0, access: { create: () => false, update: () => false } },
     // AI account the user connected. Written only by the server (overrideAccess); the key is encrypted and never readable through the API.
     {
       name: 'aiProvider',

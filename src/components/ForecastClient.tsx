@@ -76,11 +76,11 @@ export function ForecastClient({ forecast: f }: { forecast: Forecast }) {
       </p>
 
       <section className={`${card} p-5`}>
-        <div className="grid grid-cols-2 gap-3 text-center sm:grid-cols-4">
-          <div className="rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">Today</p><p className="text-lg font-extrabold">{money(f.start)}</p></div>
-          <div className="rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">In 30 days</p><p className={`text-lg font-extrabold ${s.at30 < 0 ? 'text-berry-500' : ''}`}>{money(s.at30)}</p></div>
-          <div className="rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">In {f.days} days</p><p className={`text-lg font-extrabold ${s.end < 0 ? 'text-berry-500' : ''}`}>{money(s.end)}</p></div>
-          <div className={`rounded-xl p-3 ${low ? 'bg-berry-100' : 'bg-banana-50'}`}><p className="text-xs font-bold text-peel-700">Lowest point</p><p className={`text-lg font-extrabold ${low ? 'text-berry-500' : ''}`}>{money(s.lowest.balance)}</p></div>
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-3 text-center">
+          <div className="min-w-0 rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">Today</p><p className="break-words text-lg font-extrabold leading-tight">{money(f.start)}</p></div>
+          <div className="min-w-0 rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">In 30 days</p><p className={`break-words text-lg font-extrabold leading-tight ${s.at30 < 0 ? 'text-berry-500' : ''}`}>{money(s.at30)}</p></div>
+          <div className="min-w-0 rounded-xl bg-banana-50 p-3"><p className="text-xs font-bold text-peel-700">In {f.days} days</p><p className={`break-words text-lg font-extrabold leading-tight ${s.end < 0 ? 'text-berry-500' : ''}`}>{money(s.end)}</p></div>
+          <div className={`min-w-0 rounded-xl p-3 ${low ? 'bg-berry-100' : 'bg-banana-50'}`}><p className="text-xs font-bold text-peel-700">Lowest point</p><p className={`break-words text-lg font-extrabold leading-tight ${low ? 'text-berry-500' : ''}`}>{money(s.lowest.balance)}</p></div>
         </div>
         <div className="mt-4"><Chart series={s.series} lowest={s.lowest} /></div>
         <label className={`mt-3 flex items-center gap-2 text-sm font-semibold ${invoices.length ? '' : 'opacity-60'}`}>

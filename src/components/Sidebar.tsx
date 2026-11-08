@@ -12,6 +12,7 @@ const nav: { href: string; label: string; icon: IconName }[] = [
   { href: '/reports', label: 'Reports', icon: 'print' },
   { href: '/forecast', label: 'Cash-flow', icon: 'chart' },
   { href: '/incomes', label: 'Incomes', icon: 'income' },
+  { href: '/tasks', label: 'Pay when done', icon: 'check' },
   { href: '/goals', label: 'Goal Page', icon: 'flag' },
   { href: '/plans', label: 'Plan Page', icon: 'calendar' },
   { href: '/subscriptions', label: 'Subscriptions', icon: 'renew' },
@@ -32,7 +33,7 @@ export function Sidebar({ email, onRender = false }: { email: string; onRender?:
       return !c
     })
   return (
-    <aside className={`sticky top-0 flex h-screen shrink-0 flex-col border-r-2 border-banana-300 bg-banana-100 p-4 transition-[width] duration-200 ${collapsed ? 'w-20' : 'w-64'}`}>
+    <aside className={`sticky top-0 flex h-screen shrink-0 flex-col overflow-y-auto autohide-scroll border-r-2 border-banana-300 bg-banana-100 p-4 transition-[width] duration-200 ${collapsed ? 'w-20' : 'w-64'}`}>
       <div className={`mb-8 flex items-center pt-2 ${collapsed ? 'flex-col gap-3' : 'justify-between gap-2 px-2'}`}>
         <div className="flex items-center gap-2 border-b-4 border-banana-400 pb-1.5">
           <span className="shrink-0 rounded-xl bg-white p-0.5">

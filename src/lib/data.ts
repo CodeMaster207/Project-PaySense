@@ -1,7 +1,7 @@
 import 'server-only'
 import { getPayloadClient } from '@/lib/payload'
 import type { getAppUser } from '@/lib/app-auth'
-import type { EntryView, GoalView, JobView, PaymentRequestView, SubscriptionView } from './types'
+import type { EntryView, GoalView, JobView, PaymentRequestView, SubscriptionView, TaskView } from './types'
 
 type AppUser = NonNullable<Awaited<ReturnType<typeof getAppUser>>>
 
@@ -100,6 +100,25 @@ export async function loadPaymentRequests(user: AppUser): Promise<PaymentRequest
     dueDate: d.dueDate ?? '',
     status: d.status ?? 'sent',
     invoiceId: d.invoiceId,
+  }))
+}
+
+export async function loadTasks(user: AppUser): Promise<TaskView[]> {
+  const payload = await getPayloadClient()
+  const { docs } = await payload.find({ collection: 'tasks', user, overrideAccess: false, limit: 200, sort: '-createdAt', depth: 0 })
+  return docs.map((d) => ({
+    id: String(d.id),
+    title: d.title,
+    payeeName: d.payeeName,
+    payeeContact: d.payeeContact,
+    amount: d.amount,
+    status: d.status ?? 'open',
+    deliveryNote: d.deliveryNote ?? '',
+    verdict: d.verdict ?? null,
+    reason: d.reason ?? '',
+    reviewedByAi: Boolean(d.reviewedByAi),
+    paidVia: d.paidVia ?? null,
+    paidDate: d.paidDate ?? '',
   }))
 }
 
