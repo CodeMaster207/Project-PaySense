@@ -14,5 +14,7 @@ export const PaymentRequests: CollectionConfig = {
     { name: 'dueDate', type: 'text', validate: (v: unknown) => (!v ? true : dayValidate(v)) },
     { name: 'invoiceId', type: 'text', required: true, index: true },
     { name: 'status', type: 'select', defaultValue: 'sent', options: ['sent', 'paid', 'cancelled'] },
+    { name: 'remindersSent', type: 'number', min: 0, defaultValue: 0 },
+    { name: 'lastReminderDate', type: 'text', validate: (v: unknown) => (!v ? true : dayValidate(v)) },
   ],
 }

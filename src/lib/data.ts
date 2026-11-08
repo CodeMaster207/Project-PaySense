@@ -100,6 +100,8 @@ export async function loadPaymentRequests(user: AppUser): Promise<PaymentRequest
     dueDate: d.dueDate ?? '',
     status: d.status ?? 'sent',
     invoiceId: d.invoiceId,
+    remindersSent: d.remindersSent ?? 0,
+    lastReminderDate: d.lastReminderDate ?? '',
   }))
 }
 

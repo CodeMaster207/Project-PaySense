@@ -97,6 +97,8 @@ export type PaymentRequestView = {
   dueDate: string
   status: 'sent' | 'paid' | 'cancelled'
   invoiceId: string
+  remindersSent: number
+  lastReminderDate: string
 }
 
 export type Insight = { kind: 'unusual' | 'saving' | 'subscription' | 'forecast' | 'fees' | 'clients'; title: string; detail: string }

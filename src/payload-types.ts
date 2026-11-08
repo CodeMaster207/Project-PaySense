@@ -227,6 +227,7 @@ export interface User {
   paypalStatus?: ('disconnected' | 'connected') | null;
   paypalLastSync?: string | null;
   autopayLimit?: number | null;
+  autoFollowUp?: boolean | null;
   aiProvider?: ('openai' | 'anthropic' | 'gemini') | null;
   aiAuth?: ('key' | 'google') | null;
   aiModel?: string | null;
@@ -588,6 +589,8 @@ export interface PaymentRequest {
   dueDate?: string | null;
   invoiceId: string;
   status?: ('sent' | 'paid' | 'cancelled') | null;
+  remindersSent?: number | null;
+  lastReminderDate?: string | null;
   createdBy?:
     | ({
         relationTo: 'admins';
@@ -898,6 +901,7 @@ export interface UsersSelect<T extends boolean = true> {
   paypalStatus?: T;
   paypalLastSync?: T;
   autopayLimit?: T;
+  autoFollowUp?: T;
   aiProvider?: T;
   aiAuth?: T;
   aiModel?: T;
@@ -1046,6 +1050,8 @@ export interface PaymentRequestsSelect<T extends boolean = true> {
   dueDate?: T;
   invoiceId?: T;
   status?: T;
+  remindersSent?: T;
+  lastReminderDate?: T;
   createdBy?: T;
   updatedBy?: T;
   updatedAt?: T;

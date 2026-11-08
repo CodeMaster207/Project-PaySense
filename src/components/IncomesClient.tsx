@@ -6,6 +6,7 @@ import { prettyDay, rm, today } from '@/lib/dates'
 import { FREQUENCIES, frequencyLabel, nextPayday } from '@/lib/jobs'
 import type { EntryView, Frequency, JobView, PaymentRequestView } from '@/lib/types'
 import { DatePicker } from './DatePicker'
+import { FollowUpSetting, PaymentRequestRow } from './FollowUpAgent'
 import { Icon } from './Icon'
 import { currencySymbol, toBase, toDisplay } from '@/lib/money'
 import { MoneyInput } from './MoneyInput'
@@ -18,9 +19,7 @@ const TABS = [
   { id: 'request' as const, button: 'Request payment' },
 ]
 
-const STATUS_STYLE = { sent: 'bg-banana-200 text-peel-900', paid: 'bg-leaf-100 text-leaf-700', cancelled: 'bg-berry-100 text-berry-500' }
-
-export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[]; jobs: JobView[]; requests: PaymentRequestView[] }) {
+export function IncomesClient({ incomes, jobs, requests, autoFollowUp }: { incomes: EntryView[]; jobs: JobView[]; requests: PaymentRequestView[]; autoFollowUp: boolean }) {
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [formOpen, setFormOpen] = useState(false)
@@ -107,8 +106,9 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
       <PageTitle icon="income" title="Incomes" sub="Track salary, allowance, and freelance pay. PayPal refunds and transfers appear on the dashboard." />
 
       <AiNote>
-        <p>Jobs, contracts and revenue are entered by you, and their payment dates and amounts are calculated by simple rules. AI is used in one place here: <b>Request payment</b>.</p>
+        <p>Jobs, contracts and revenue are entered by you, and their payment dates and amounts are calculated by simple rules. AI is used in two places here, both in <b>Request payment</b>.</p>
         <p><b>Invoice assistant.</b> Type a request in your own words, such as &quot;invoice Acme RM500 for logo design, due in 14 days&quot;, and the AI fills in the invoice: who, how much, what for, and when it is due. The app then checks the result against what you typed, so the AI cannot invent an email address or change the amount. <b>Nothing is sent until you review the form and press Send request.</b> Without an AI account, a simple text reader does the same job.</p>
+        <p><b>Follow-up agent.</b> When a payment request is overdue, the agent drafts a polite reminder, firmer the longer it has waited. You read it and press Send, or you can switch on automatic mode so it sends reminders itself when you press Check status. The rules are fixed in code: only overdue unpaid invoices, at most 3 reminders each, at least 3 days apart. The AI only chooses the words, and its wording is rejected if it contains a link, an email address or any number other than the days overdue, in which case a standard message is used.</p>
         <p>Your incomes are also part of the snapshot that the Personal AI chat, the goal planner and AI Insights read, and AI Insights uses them to show which clients you depend on.</p>
       </AiNote>
       <p className="mb-2 text-sm text-peel-700">
@@ -318,6 +318,7 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
               <Icon name="sync" className="size-4" /> {refreshAct.pending ? 'Checking...' : 'Check status'}
             </button>
           </h2>
+          <FollowUpSetting on={autoFollowUp} />
           <Feedback error={refreshAct.error} notice={refreshAct.notice} />
           {([
             { title: 'Pending', rows: requests.filter((r) => r.status === 'sent'), empty: 'No pending requests.' },
@@ -328,17 +329,7 @@ export function IncomesClient({ incomes, jobs, requests }: { incomes: EntryView[
                 <h3 className="border-b border-banana-200 bg-banana-50 px-4 py-1.5 text-sm font-extrabold text-peel-700">{group.title} ({group.rows.length})</h3>
                 <ul className="divide-y divide-banana-100">
                   {group.rows.length === 0 && <li className="px-4 py-3 text-sm text-peel-500">{group.empty}</li>}
-                  {group.rows.map((r) => (
-                    <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-bold">{r.description}</p>
-                        <p className="break-all text-sm text-peel-700">{r.email}{r.dueDate ? `, due ${prettyDay(r.dueDate)}` : ''}</p>
-                        <p className="break-all text-xs text-peel-500">PayPal invoice ID: <span className="font-mono">{r.invoiceId}</span></p>
-                      </div>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-bold capitalize ${STATUS_STYLE[r.status]}`}>{r.status === 'sent' ? 'pending' : r.status}</span>
-                      <span className="font-bold text-leaf-700">{rm(r.amount)}</span>
-                    </li>
-                  ))}
+                  {group.rows.map((r) => <PaymentRequestRow key={r.id} r={r} />)}
                 </ul>
               </div>
             ),

@@ -41,6 +41,8 @@ export const Users: CollectionConfig = {
     },
     // Largest task (RM) the payments agent may pay without asking. 0 means it always asks first. Server-set only.
     { name: 'autopayLimit', type: 'number', min: 0, defaultValue: 0, access: { create: () => false, update: () => false } },
+    // Lets the follow-up agent send overdue-invoice reminders itself when payment requests are checked. Off by default. Server-set only.
+    { name: 'autoFollowUp', type: 'checkbox', defaultValue: false, access: { create: () => false, update: () => false } },
     // AI account the user connected. Written only by the server (overrideAccess); the key is encrypted and never readable through the API.
     {
       name: 'aiProvider',

@@ -232,6 +232,24 @@ export async function sendPayout(input: { recipient: string; amount: number; cur
   return { batchId, transactionId: null, status: 'PENDING' }
 }
 
+/** Asks PayPal to email the client a reminder about an unpaid invoice. */
+export async function remindInvoice(id: string, input: { subject: string; note: string }) {
+  const res = await fetch(`${BASE}/v2/invoicing/invoices/${encodeURIComponent(id)}/remind`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${await token()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subject: input.subject.slice(0, 100), note: input.note.slice(0, 500), send_to_invoicer: false }),
+    cache: 'no-store',
+  })
+  if (res.ok) return
+  if (res.status === 401 || res.status === 403) throw new Error('PayPal refused the reminder. Check that "Invoicing" is turned on for your sandbox app.')
+  let detail = ''
+  try {
+    const j = (await res.json()) as { message?: string; details?: { description?: string; issue?: string }[] }
+    detail = j.details?.[0]?.description ?? j.details?.[0]?.issue ?? j.message ?? ''
+  } catch {}
+  throw new Error(`PayPal could not send the reminder (${res.status})${detail ? `: ${detail}` : ''}`)
+}
+
 /** Maps PayPal's invoice status to the three states the app shows. */
 export async function paymentRequestStatus(id: string): Promise<'sent' | 'paid' | 'cancelled'> {
   const res = await fetch(`${BASE}/v2/invoicing/invoices/${encodeURIComponent(id)}`, { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store' })

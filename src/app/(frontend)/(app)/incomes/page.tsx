@@ -7,5 +7,5 @@ export default async function IncomesPage() {
   const [entries, jobs, requests] = await Promise.all([loadEntries(user), loadJobs(user), loadPaymentRequests(user)])
   // Exclude PayPal-sourced entries (refunds etc.) — those appear on the dashboard only.
   const incomes = entries.filter((e) => e.type === 'income' && e.source !== 'paypal')
-  return <IncomesClient incomes={incomes} jobs={jobs} requests={requests} />
+  return <IncomesClient incomes={incomes} jobs={jobs} requests={requests} autoFollowUp={Boolean((user as { autoFollowUp?: boolean }).autoFollowUp)} />
 }

@@ -5,6 +5,7 @@ import { feeSummary, incomeByClient } from './insights'
 import { type InvoiceDraft, parseInvoiceText } from './invoice-parse'
 import type { Forecast } from './forecast'
 import { type Review, ruleReview } from './task-review'
+import { cleanReminderText, templateReminder, type Tone } from './followup'
 import type { MonthReport } from './report'
 import type { EntryView, Insight, PlanDraft, PlanItem, SubscriptionView } from './types'
 
@@ -345,6 +346,38 @@ export async function aiReviewTask(input: { title: string; note: string }): Prom
     } catch {}
   }
   return { ...rules, ai: false }
+}
+
+/**
+ * Writes a polite reminder for an overdue invoice. How firm it is, and whether one may be sent at all, is decided by
+ * the rules in followup.ts. The AI only chooses the words, and its text is rejected if it contains a link, an email
+ * address or any number other than the days overdue, in which case the fixed wording is used.
+ */
+export async function aiReminderDraft(input: { description: string; days: number; tone: Tone }): Promise<{ subject: string; note: string; ai: boolean }> {
+  const fallback = templateReminder(input)
+  const reply = await llm(
+    [
+      {
+        role: 'system',
+        content:
+          'You write a short, polite payment reminder email for a freelancer or small seller to send about an overdue invoice. ' +
+          `The tone must be ${input.tone}: gentle = friendly and assumes it was forgotten, firm = clear and direct but courteous, final = serious, asks for payment or contact today, still polite. ` +
+          'Write 2 or 3 sentences. Do not mention amounts, dates, links, bank details or email addresses. The only number you may use is the days overdue. ' +
+          'Reply with JSON only: {"subject":"under 70 characters","note":"the message"}.',
+      },
+      { role: 'user', content: JSON.stringify({ invoiceFor: input.description.slice(0, 80), daysOverdue: input.days, tone: input.tone }) },
+    ],
+    true,
+  )
+  if (reply) {
+    try {
+      const j = JSON.parse(reply) as { subject?: unknown; note?: unknown }
+      const subject = cleanReminderText(j.subject, input.days, 100)
+      const note = cleanReminderText(j.note, input.days, 500)
+      if (subject && note) return { subject, note, ai: true }
+    } catch {}
+  }
+  return { ...fallback, ai: false }
 }
 
 const TXN_CATEGORIES = ['Streaming', 'Software', 'Shopping', 'Utilities', 'Other'] as const

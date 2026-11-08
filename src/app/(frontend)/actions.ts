@@ -7,8 +7,9 @@ import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from
 import { buildMonthReport } from '@/lib/report'
 import { loadForecast } from '@/lib/forecast-input'
 import { AUTOPAY_HARD_CAP, canAutopay, isPayeeContact, TASK_MAX } from '@/lib/task-review'
-import { aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiRequest, aiReviewTask, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
-import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
+import { canRemind, overdueDays, toneFor, type Tone } from '@/lib/followup'
+import { aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiReminderDraft, aiRequest, aiReviewTask, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
+import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, remindInvoice, sendPaymentRequest, sendPayout } from '@/lib/paypal'
 import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
 import { getRates } from '@/lib/rates'
@@ -567,15 +568,93 @@ export async function refreshPaymentRequestsAction(): Promise<ActionResult> {
     const payload = await getPayloadClient()
     const { docs } = await payload.find({ collection: 'payment-requests', user, overrideAccess: false, where: { status: { equals: 'sent' } }, limit: 100, depth: 0 })
     let paid = 0
+    const stillPending: typeof docs = []
     for (const d of docs) {
       const status = await paymentRequestStatus(d.invoiceId)
-      if (status === d.status) continue
+      if (status === d.status) {
+        stillPending.push(d)
+        continue
+      }
       await payload.update({ collection: 'payment-requests', id: d.id, overrideAccess: true, data: { status } })
       if (status === 'paid') paid++
     }
-    return { ok: true, message: paid ? `${paid} request${paid === 1 ? ' was' : 's were'} paid. Resync on the PayPal page to import the payment.` : 'No new payments yet.' }
+
+    // Follow-up agent in automatic mode: it only runs because the user switched it on, and it follows the same fixed rules as a manual reminder.
+    let reminded = 0
+    const skipped: string[] = []
+    if ((user as { autoFollowUp?: boolean }).autoFollowUp) {
+      for (const d of stillPending) {
+        const check = canRemind({ status: d.status ?? 'sent', dueDate: d.dueDate ?? '', remindersSent: d.remindersSent ?? 0, lastReminderDate: d.lastReminderDate ?? '', today: today() })
+        if (!check.ok) continue
+        try {
+          const days = overdueDays(d.dueDate ?? '', today())
+          const draft = await aiReminderDraft({ description: d.description, days, tone: toneFor(days, d.remindersSent ?? 0) })
+          await remindInvoice(d.invoiceId, draft)
+          await payload.update({ collection: 'payment-requests', id: d.id, overrideAccess: true, data: { remindersSent: (d.remindersSent ?? 0) + 1, lastReminderDate: today() } })
+          reminded++
+        } catch (e) {
+          skipped.push(msg(e, 'a reminder failed'))
+        }
+      }
+    }
+
+    const parts = [
+      paid ? `${paid} request${paid === 1 ? ' was' : 's were'} paid. Resync on the PayPal page to import the payment.` : 'No new payments yet.',
+      reminded ? `The follow-up agent sent ${reminded} reminder${reminded === 1 ? '' : 's'} for overdue invoices.` : '',
+      skipped.length ? `One reminder could not be sent: ${skipped[0]}` : '',
+    ]
+    return { ok: true, message: parts.filter(Boolean).join(' ') }
   } catch (e) {
     return fail(msg(e, 'Could not check your payment requests.'))
+  }
+}
+
+// ---------- follow-up agent ----------
+/** The agent drafts a reminder for one overdue invoice. Nothing is sent: the user reads it, may edit it, and sends it. */
+export async function draftReminderAction(id: string): Promise<ActionResult<{ blocked: string | null; subject: string; note: string; days: number; tone: Tone; ai: boolean }>> {
+  try {
+    const user = await requireUser()
+    const payload = await getPayloadClient()
+    const d = await payload.findByID({ collection: 'payment-requests', id, user, overrideAccess: false, depth: 0 })
+    const check = canRemind({ status: d.status ?? 'sent', dueDate: d.dueDate ?? '', remindersSent: d.remindersSent ?? 0, lastReminderDate: d.lastReminderDate ?? '', today: today() })
+    const days = overdueDays(d.dueDate ?? '', today())
+    const tone = toneFor(days, d.remindersSent ?? 0)
+    if (!check.ok) return { ok: true, data: { blocked: check.reason, subject: '', note: '', days, tone, ai: false } }
+    const draft = await aiReminderDraft({ description: d.description, days, tone })
+    return { ok: true, data: { blocked: null, subject: draft.subject, note: draft.note, days, tone, ai: draft.ai } }
+  } catch (e) {
+    return fail(msg(e, 'Could not draft the reminder.'))
+  }
+}
+
+/** Sends a reminder the user has reviewed. The rules (overdue, cooldown, reminder limit) are checked again here. */
+export async function sendReminderAction(id: string, subject: string, note: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    const payload = await getPayloadClient()
+    const d = await payload.findByID({ collection: 'payment-requests', id, user, overrideAccess: false, depth: 0 })
+    const check = canRemind({ status: d.status ?? 'sent', dueDate: d.dueDate ?? '', remindersSent: d.remindersSent ?? 0, lastReminderDate: d.lastReminderDate ?? '', today: today() })
+    if (!check.ok) return fail(check.reason)
+    const cleanSubject = String(subject ?? '').replace(/\s+/g, ' ').trim().slice(0, 100)
+    const cleanNote = String(note ?? '').replace(/\s+/g, ' ').trim().slice(0, 500)
+    if (!cleanSubject || cleanNote.length < 10) return fail('Add a subject and a message of at least a sentence.')
+    await remindInvoice(d.invoiceId, { subject: cleanSubject, note: cleanNote })
+    await payload.update({ collection: 'payment-requests', id, overrideAccess: true, data: { remindersSent: (d.remindersSent ?? 0) + 1, lastReminderDate: today() } })
+    return { ok: true, message: `Reminder sent to ${d.recipientEmail}.` }
+  } catch (e) {
+    return fail(msg(e, 'Could not send the reminder.'))
+  }
+}
+
+export async function setAutoFollowUpAction(on: boolean): Promise<ActionResult> {
+  try {
+    const user = await requireUser()
+    const payload = await getPayloadClient()
+    await payload.update({ collection: 'users', id: user.id, overrideAccess: true, data: { autoFollowUp: Boolean(on) } })
+    return { ok: true, message: on ? 'The agent will send reminders for overdue invoices when you check status.' : 'Automatic reminders are off. The agent will only draft them.' }
+  } catch (e) {
+    return fail(msg(e, 'Could not change the follow-up setting.'))
   }
 }
 
