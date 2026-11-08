@@ -44,7 +44,7 @@ function group(rows: ReportRow[], key: (r: ReportRow) => string): Share[] {
 function totals(entries: EntryView[], month: string, todayKey: string) {
   const rows: ReportRow[] = entries
     .filter((e) => e.source !== 'goal' && e.date.startsWith(month) && e.date <= todayKey)
-    .map((e) => ({ date: e.date, type: e.type, description: e.description, client: e.counterparty ?? '', amount: e.amount, fee: e.type === 'income' ? e.fee ?? 0 : 0, source: e.source }))
+    .map((e) => ({ date: e.date, type: e.type, description: e.description, client: e.counterparty ?? '', amount: e.amount, fee: e.fee ?? 0, source: e.source }))
     .sort((a, b) => a.date.localeCompare(b.date))
   const revenue = r2(rows.filter((r) => r.type === 'income').reduce((a, r) => a + r.amount, 0))
   const fees = r2(rows.reduce((a, r) => a + r.fee, 0))

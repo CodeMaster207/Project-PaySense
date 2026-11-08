@@ -14,7 +14,7 @@ import { MoneyInput } from './MoneyInput'
 import { MonthCalendar } from './MonthCalendar'
 import { StatGrid } from './StatGrid'
 import { PersonalAI } from './PersonalAI'
-import { AiNote, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { AiNote, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction, Waiting } from './ui'
 
 export function Ledger({ entries: manual, goals, jobs, engine, email, paypalMode, currency }: {
   currency: string; entries: EntryView[]; goals: GoalView[]; jobs: JobView[]; engine: string; email: string; paypalMode: string }) {
@@ -104,14 +104,17 @@ export function Ledger({ entries: manual, goals, jobs, engine, email, paypalMode
 
           <div className="mt-4 flex flex-wrap items-end justify-between gap-4 border-t-2 border-banana-100 pt-4">
             <div className="flex flex-col gap-2">
-              <button
-                type="button"
-                className={btnPrimary}
-                disabled={act.pending}
-                onClick={() => act.run(() => syncPayPalAction())}
-              >
-                <Icon name="sync" /> {act.pending ? 'Importing...' : 'Import from PayPal'}
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  disabled={act.pending}
+                  onClick={() => act.run(() => syncPayPalAction())}
+                >
+                  <Icon name="sync" /> {act.pending ? 'Importing...' : 'Import from PayPal'}
+                </button>
+                <Waiting show={act.pending} label="Fetching your PayPal payments..." />
+              </div>
               <Feedback error={act.error} notice={act.notice} />
               <div className="relative">
                 <button type="button" className={btnGhost} onClick={() => setSettings((s) => !s)}>

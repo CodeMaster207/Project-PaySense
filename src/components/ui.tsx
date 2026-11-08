@@ -38,6 +38,17 @@ export function useAction() {
   return { run, pending, error, notice, setError }
 }
 
+/** A small spinning ring shown next to a button while its action is running. */
+export function Waiting({ show, label = 'Working...' }: { show: boolean; label?: string }) {
+  if (!show) return null
+  return (
+    <span role="status" className="inline-flex items-center gap-2 text-sm font-bold text-peel-700">
+      <span aria-hidden className="size-5 animate-spin rounded-full border-[3px] border-banana-200 border-t-peel-900" />
+      {label}
+    </span>
+  )
+}
+
 export function Feedback({ error, notice }: { error?: string | null; notice?: string | null }) {
   if (!error && !notice) return null
   return (

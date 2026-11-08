@@ -8,7 +8,8 @@ export type Provider = 'openai' | 'anthropic' | 'gemini'
 export const PROVIDERS: Record<Provider, { label: string; model: string }> = {
   openai: { label: 'OpenAI', model: 'gpt-4o-mini' },
   anthropic: { label: 'Claude', model: 'claude-haiku-5-5' },
-  gemini: { label: 'Gemini', model: 'gemini-2.5-flash' },
+  // An alias that always points at Google's current Flash model, so it survives model retirements.
+  gemini: { label: 'Gemini', model: 'gemini-flash-latest' },
 }
 
 export const isProvider = (v: unknown): v is Provider => typeof v === 'string' && v in PROVIDERS

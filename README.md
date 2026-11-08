@@ -136,6 +136,7 @@ Good to know:
 
 Notes:
 - PayPal can take up to a few hours before a new sandbox payment appears in Transaction Search. The page explains this.
+- Only real payments are imported (money received and sent, plus refunds). PayPal also lists movements of your own balance, such as the sandbox opening balance, settlements out of the balance, and holds with their reversals. Those are neither income nor expenses, so they are skipped, and any imported by an earlier sync are removed on the next Resync.
 - The app reads the account's currency from PayPal and converts imported amounts to RM, keeping the original amount visible.
 - To try **Request payment**, send a request to your Personal sandbox account's email, then log in to sandbox.paypal.com as that account and open **Invoices** to see it. Sandbox emails are not delivered.
 

@@ -27,17 +27,20 @@ export function incomeByClient(entries: EntryView[], until: string, days = 90): 
 /** PayPal fees paid and what is left of your income after them, over the last `days` days. */
 export function feeSummary(entries: EntryView[], until: string, days = 90) {
   const since = addDays(until, -days)
-  let fees = 0
+  let fees = 0 // every fee PayPal charged, on payments received and on payouts sent
+  let incomeFees = 0 // only the fees on money received, used for the percentage
   let paypalIncome = 0
   let income = 0
   for (const e of entries) {
-    if (e.type !== 'income' || e.source === 'goal' || e.date < since || e.date > until) continue
+    if (e.source === 'goal' || e.date < since || e.date > until) continue
+    if (e.source === 'paypal') fees += e.fee ?? 0
+    if (e.type !== 'income') continue
     income += e.amount
     if (e.source === 'paypal') {
       paypalIncome += e.amount
-      fees += e.fee ?? 0
+      incomeFees += e.fee ?? 0
     }
   }
   const round = (n: number) => Math.round(n * 100) / 100
-  return { fees: round(fees), paypalIncome: round(paypalIncome), net: round(income - fees), rate: paypalIncome > 0 ? fees / paypalIncome : 0 }
+  return { fees: round(fees), paypalIncome: round(paypalIncome), net: round(income - fees), rate: paypalIncome > 0 ? incomeFees / paypalIncome : 0 }
 }

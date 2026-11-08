@@ -84,22 +84,41 @@ function feeInRm(fee: { value?: string; currency_code?: string } | undefined, ra
   return Math.round((value / (rates[cur] ?? 1)) * 100) / 100
 }
 
-export async function fetchSandboxTransactions(days = 90): Promise<PayPalTxn[]> {
+/**
+ * Whether a PayPal event code is a real payment (money received or sent) rather than a movement of your own balance.
+ * Payments are the T00xx codes, plus refunds and reversals (T1106, T1107). Everything else PayPal lists, such as the
+ * sandbox opening balance (T1900), settlements out of the balance (T2002), and holds and their reversals (T1503, T1105),
+ * moves your own money around and is neither income nor an expense.
+ */
+export const isPaymentEvent = (code: string) => /^T00\d{2}$/.test(code) || code === 'T1106' || code === 'T1107'
+
+/** Reads sandbox payments. Balance movements are left out; pass a set to learn which transaction IDs were skipped. */
+export async function fetchSandboxTransactions(days = 90, skipped?: Set<string>): Promise<PayPalTxn[]> {
   const t = await token()
   const { rates } = await getRates()
   const out: PayPalTxn[] = []
   const end = today()
-  for (let offset = 0; offset < days; offset += 31) {
-    const to = addDays(end, -offset)
-    const from = addDays(to, -30)
-    const url = `${BASE}/v1/reporting/transactions?start_date=${from}T00:00:00-0000&end_date=${to}T23:59:59-0000&fields=all&page_size=100`
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${t}` }, cache: 'no-store' })
-    if (res.status === 401) throw new Error('The PayPal access token was rejected or has expired. Generate a new one.')
-    if (!res.ok) throw new Error(`PayPal transaction search failed (${res.status}). Enable "Transaction Search" on the sandbox app.`)
-    const json = (await res.json()) as { transaction_details?: RawTxn[] }
-    for (const row of json.transaction_details ?? []) {
+  // The 31-day windows are independent, so ask for all of them at once instead of one after another.
+  const offsets = Array.from({ length: Math.ceil(days / 31) }, (_, i) => i * 31)
+  const pages = await Promise.all(
+    offsets.map(async (offset) => {
+      const to = addDays(end, -offset)
+      const from = addDays(to, -30)
+      const url = `${BASE}/v1/reporting/transactions?start_date=${from}T00:00:00-0000&end_date=${to}T23:59:59-0000&fields=all&page_size=100`
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${t}` }, cache: 'no-store' })
+      if (res.status === 401) throw new Error('The PayPal access token was rejected or has expired. Generate a new one.')
+      if (!res.ok) throw new Error(`PayPal transaction search failed (${res.status}). Enable "Transaction Search" on the sandbox app.`)
+      return ((await res.json()) as { transaction_details?: RawTxn[] }).transaction_details ?? []
+    }),
+  )
+  for (const rows of pages) {
+    for (const row of rows) {
       const info = row.transaction_info
       if (!info?.transaction_id || !info.transaction_amount?.value || !info.transaction_initiation_date) continue
+      if (info.transaction_event_code && !isPaymentEvent(info.transaction_event_code)) {
+        skipped?.add(info.transaction_id)
+        continue
+      }
       const amount = Number(info.transaction_amount.value)
       if (!Number.isFinite(amount) || amount === 0) continue
       const currency = (info.transaction_amount.currency_code ?? 'MYR').toUpperCase()

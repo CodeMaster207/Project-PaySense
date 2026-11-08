@@ -1,5 +1,6 @@
 import 'server-only'
 import { type AiConfig, googleAccessToken, PROVIDERS, resolveAi } from './ai-config'
+import { pickGeminiModel } from './gemini-models'
 import { addDays, daysBetween, rm, today } from './dates'
 import { feeSummary, incomeByClient } from './insights'
 import { type InvoiceDraft, parseInvoiceText } from './invoice-parse'
@@ -20,11 +21,13 @@ export async function aiProvider() {
 const stripFences = (s: string) => s.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim()
 
 /** One chat request to the configured provider. Fixed provider URLs only, so a user key can never point the server elsewhere. */
-export async function aiRequest(cfg: AiConfig, messages: Msg[], json = false): Promise<{ text: string | null; error?: string }> {
+export async function aiRequest(cfg: AiConfig, messages: Msg[], json = false, timeoutMs = 45_000): Promise<{ text: string | null; error?: string }> {
   const system = messages.filter((m) => m.role === 'system').map((m) => m.content).join('\n')
   const turns = messages.filter((m) => m.role !== 'system')
   while (turns.length && turns[0].role === 'assistant') turns.shift()
   try {
+    // Without a limit, one stalled answer from the provider would freeze whatever is waiting on it.
+    const signal = AbortSignal.timeout(timeoutMs)
     let res: Response
     if (cfg.provider === 'anthropic') {
       res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -37,6 +40,7 @@ export async function aiRequest(cfg: AiConfig, messages: Msg[], json = false): P
           messages: turns.map((m) => ({ role: m.role, content: m.content })),
         }),
         cache: 'no-store',
+        signal,
       })
       if (!res.ok) return { text: null, error: await providerError(res) }
       const blocks = ((await res.json()).content ?? []) as { type: string; text?: string }[]
@@ -54,6 +58,7 @@ export async function aiRequest(cfg: AiConfig, messages: Msg[], json = false): P
           generationConfig: { temperature: 0.4, ...(json ? { responseMimeType: 'application/json' } : {}) },
         }),
         cache: 'no-store',
+        signal,
       })
       if (!res.ok) return { text: null, error: await providerError(res) }
       const text = ((await res.json()).candidates?.[0]?.content?.parts?.[0]?.text ?? null) as string | null
@@ -64,25 +69,47 @@ export async function aiRequest(cfg: AiConfig, messages: Msg[], json = false): P
       headers: { Authorization: `Bearer ${cfg.key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: cfg.model, messages, temperature: 0.4, ...(json ? { response_format: { type: 'json_object' } } : {}) }),
       cache: 'no-store',
+      signal,
     })
     if (!res.ok) return { text: null, error: await providerError(res) }
     return { text: (await res.json()).choices?.[0]?.message?.content ?? null }
-  } catch {
-    return { text: null, error: 'Could not reach the AI provider.' }
+  } catch (e) {
+    const timedOut = e instanceof Error && (e.name === 'TimeoutError' || e.name === 'AbortError')
+    return { text: null, error: timedOut ? `The AI provider took longer than ${Math.round(timeoutMs / 1000)} seconds to answer.` : 'Could not reach the AI provider.' }
   }
 }
 
 async function providerError(res: Response) {
+  // Every provider puts a readable reason in error.message, which is more useful than a bare status code.
+  const detail = await res
+    .json()
+    .then((j: { error?: { message?: string } }) => String(j?.error?.message ?? '').replace(/\s+/g, ' ').trim().slice(0, 160))
+    .catch(() => '')
   if (res.status === 401 || res.status === 403) return 'The provider rejected this API key.'
   if (res.status === 404) return 'The provider does not know that model name.'
   if (res.status === 429) return 'The provider says this key is out of quota or rate limited.'
-  return `The provider returned an error (${res.status}).`
+  return `The provider returned an error (${res.status})${detail ? `: ${detail}` : ''}.`
 }
 
-async function llm(messages: Msg[], json = false): Promise<string | null> {
+/** Asks Gemini which models an account can use and picks the best one. `headers` carries the key or the sign-in token. */
+export async function discoverGeminiModel(headers: Record<string, string>): Promise<{ pick: string | null; all: string[]; error?: string }> {
+  try {
+    const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers, cache: 'no-store', signal: AbortSignal.timeout(10_000) })
+    if (!res.ok) return { pick: null, all: [], error: await providerError(res) }
+    const j = (await res.json()) as { models?: { name?: string; supportedGenerationMethods?: string[] }[] }
+    const all = (j.models ?? [])
+      .filter((m) => m.name && (m.supportedGenerationMethods ?? []).includes('generateContent'))
+      .map((m) => String(m.name).replace(/^models\//, ''))
+    return { pick: pickGeminiModel(all), all }
+  } catch {
+    return { pick: null, all: [], error: 'Could not reach Google. Check your connection and try again.' }
+  }
+}
+
+async function llm(messages: Msg[], json = false, timeoutMs?: number): Promise<string | null> {
   const cfg = await resolveAi()
   if (!cfg) return null
-  return (await aiRequest(cfg, messages, json)).text
+  return (await aiRequest(cfg, messages, json, timeoutMs)).text
 }
 
 const INSIGHT_KINDS: Insight['kind'][] = ['unusual', 'saving', 'subscription', 'forecast', 'fees', 'clients']
@@ -135,7 +162,7 @@ function ruleInsights(entries: EntryView[], subs: SubscriptionView[]): Insight[]
 }
 
 /** Finds unusual spending, savings opportunities, subscription waste and a short forecast. AI when a key is set, simple rules otherwise. */
-export async function aiInsights(entries: EntryView[], subs: SubscriptionView[]): Promise<{ insights: Insight[]; ai: boolean }> {
+export async function aiInsights(entries: EntryView[], subs: SubscriptionView[]): Promise<{ insights: Insight[]; ai: boolean; engine?: string; aiError?: string }> {
   const since = addDays(today(), -90)
   const rows = entries
     .filter((e) => e.date >= since && e.date <= today() && e.source !== 'goal')
@@ -143,7 +170,11 @@ export async function aiInsights(entries: EntryView[], subs: SubscriptionView[])
     .map((e) => ({ date: e.date, type: e.type, what: e.description.slice(0, 60), client: e.counterparty?.slice(0, 60), amount: e.amount, fee: e.fee, paypal: e.source === 'paypal' }))
   const fees = feeSummary(entries, today())
   const { total: incomeTotal, clients } = incomeByClient(entries, today())
-  const text = await llm(
+  const cfg = await resolveAi()
+  const reply = !cfg
+    ? null
+    : await aiRequest(
+        cfg,
     [
       {
         role: 'system',
@@ -166,6 +197,7 @@ export async function aiInsights(entries: EntryView[], subs: SubscriptionView[])
     ],
     true,
   )
+  const text = reply?.text ?? null
   if (text) {
     try {
       const raw = (JSON.parse(text) as { insights?: Partial<Insight>[] }).insights ?? []
@@ -177,10 +209,12 @@ export async function aiInsights(entries: EntryView[], subs: SubscriptionView[])
       for (const extra of [fees.fees > 0 ? feesInsight(entries) : null, clientsInsight(entries)]) {
         if (extra && !insights.some((i) => i.kind === extra.kind)) insights.push(extra)
       }
-      if (insights.length) return { insights, ai: true }
+      if (insights.length) return { insights, ai: true, engine: `${PROVIDERS[cfg!.provider].label} (${cfg!.model})` }
     } catch {}
   }
-  return { insights: ruleInsights(entries, subs), ai: false }
+  // An AI account is connected but did not give a usable answer: say why, so the user can decide what to do about it.
+  const aiError = cfg ? (reply?.error ?? 'The AI replied in a format the app could not read.') : undefined
+  return { insights: ruleInsights(entries, subs), ai: false, ...(aiError ? { aiError } : {}) }
 }
 
 /**
@@ -385,7 +419,9 @@ export type TxnKind = 'income' | 'expense' | 'subscription'
 export type TxnLabel = { kind: TxnKind; category: string }
 
 /** Asks the model to tell recurring subscriptions from one-off spending and to categorise each payment. Returns null without a key or on failure. */
-export async function aiCategorize(txns: { id: string; business: string; amount: number; kind: TxnKind }[]): Promise<Map<string, TxnLabel> | null> {
+export async function aiCategorize(all: { id: string; business: string; amount: number; kind: TxnKind }[]): Promise<Map<string, TxnLabel> | null> {
+  // Money received is always income, so only outgoing payments need the AI. That keeps the request small and fast.
+  const txns = all.filter((t) => t.amount < 0)
   if (txns.length === 0 || !(await resolveAi())) return null
   const out = new Map<string, TxnLabel>()
   for (let i = 0; i < txns.length; i += 40) {
@@ -402,8 +438,10 @@ export async function aiCategorize(txns: { id: string; business: string; amount:
         { role: 'user', content: JSON.stringify(batch.map((t) => ({ id: t.id, merchant: t.business.slice(0, 120), amount: t.amount }))) },
       ],
       true,
+      20_000, // a sync must never wait long for the AI: after this it carries on with the plain rules
     )
-    if (!text) continue
+    // No answer almost always means the provider was too slow, so stop here instead of waiting again for every later batch.
+    if (!text) break
     try {
       const items = (JSON.parse(text) as { items?: { id?: string; kind?: string; category?: string }[] }).items ?? []
       for (const it of items) {

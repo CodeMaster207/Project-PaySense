@@ -10,7 +10,7 @@ import { DatePicker } from './DatePicker'
 import { GridCaption } from './grid/GridCaption'
 import { PayPalGrid } from './grid/PayPalGrid'
 import { Icon } from './Icon'
-import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction, Waiting } from './ui'
 
 type Type = 'all' | 'incomes' | 'expenses' | 'goals'
 type Row = { key: string; date: string; business: string; amount: number; group: 'incomes' | 'expenses' | 'goals'; tag: string; txnId: string; original: string; fee: number }
@@ -60,7 +60,8 @@ export function PayPalClient({
 
   const rows: Row[] = [
     ...entries.filter((e) => e.source === 'paypal').map((e): Row => ({ key: `entry-${e.id}`, date: e.date, business: e.description, amount: e.type === 'income' ? e.amount : -e.amount, group: e.type === 'income' ? 'incomes' : 'expenses', tag: e.type === 'income' ? 'income' : 'expense', txnId: e.externalId ?? '', original: fmtOriginal(e.originalCurrency, e.originalAmount), fee: e.fee ?? 0 })),
-    ...subs.map((s): Row => ({ key: `sub-${s.id}`, date: s.status === 'active' ? s.renewDate : s.terminationDate, business: s.name, amount: -s.amount, group: 'expenses', tag: 'expense', txnId: s.paypalTransactionId, original: fmtOriginal(s.originalCurrency, s.originalAmount), fee: 0 })),
+    // Only subscriptions that came from PayPal or were linked to a PayPal payment belong on this page.
+    ...subs.filter((s) => s.source === 'paypal' || s.linked).map((s): Row => ({ key: `sub-${s.id}`, date: s.status === 'active' ? s.renewDate : s.terminationDate, business: s.name, amount: -s.amount, group: 'expenses', tag: 'expense', txnId: s.paypalTransactionId, original: fmtOriginal(s.originalCurrency, s.originalAmount), fee: 0 })),
     ...goalFunds.map((e): Row => ({ key: `goal-${e.id}`, date: e.date, business: e.description.replace(/^Goal: /, ''), amount: -e.amount, group: 'goals', tag: 'goal fund', txnId: '', original: '', fee: 0 })),
   ]
     .filter((r) => (type === 'all' || type === r.group) && (!from || r.date >= from) && (!to || r.date <= to))
@@ -215,6 +216,7 @@ export function PayPalClient({
         <button className={btnPrimary} disabled={act.pending} onClick={() => act.run(() => syncPayPalAction())}>
           <Icon name="sync" /> {act.pending ? 'Syncing...' : 'Resync'}
         </button>
+        <Waiting show={act.pending} label="Fetching your PayPal payments..." />
       </div>
     </div>
   )

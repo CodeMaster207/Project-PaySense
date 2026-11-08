@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
-import { aiRequest } from '@/lib/ai'
+import { aiRequest, discoverGeminiModel } from '@/lib/ai'
 import { encryptKey, googleExchangeCode, PROVIDERS, siteUrl } from '@/lib/ai-config'
 import { getAppUser } from '@/lib/app-auth'
 import { getPayloadClient } from '@/lib/payload'
@@ -21,8 +21,17 @@ export async function GET(req: Request) {
   try {
     const t = await googleExchangeCode(code)
     if (!t.refreshToken) return back('norefresh')
-    const model = PROVIDERS.gemini.model
-    const test = await aiRequest({ provider: 'gemini', key: t.refreshToken, model, source: 'user', auth: 'google' }, [{ role: 'user', content: 'Reply with the single word: ok' }])
+    let model: string = PROVIDERS.gemini.model
+    const ping = (m: string) => aiRequest({ provider: 'gemini', key: t.refreshToken as string, model: m, source: 'user', auth: 'google' }, [{ role: 'user', content: 'Reply with the single word: ok' }])
+    let test = await ping(model)
+    // If Google does not recognise the default model name, use one this account can actually call.
+    if (!test.text && /model name/.test(test.error ?? '')) {
+      const found = await discoverGeminiModel({ Authorization: `Bearer ${t.accessToken}` })
+      if (found.pick && found.pick !== model) {
+        model = found.pick
+        test = await ping(model)
+      }
+    }
     if (!test.text) return back('test')
     const payload = await getPayloadClient()
     await payload.update({

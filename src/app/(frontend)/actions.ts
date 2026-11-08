@@ -3,12 +3,12 @@
 import type { Where } from 'payload'
 import { getPayloadClient } from '@/lib/payload'
 import { endAppSession, getAppUser, startAppSession } from '@/lib/app-auth'
-import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from '@/lib/ai-config'
+import { decryptKey, encryptKey, isProvider, PROVIDERS, resolveAi, revokeGoogleToken } from '@/lib/ai-config'
 import { buildMonthReport } from '@/lib/report'
 import { loadForecast } from '@/lib/forecast-input'
 import { AUTOPAY_HARD_CAP, canAutopay, isPayeeContact, TASK_MAX } from '@/lib/task-review'
 import { canRemind, overdueDays, toneFor, type Tone } from '@/lib/followup'
-import { aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiReminderDraft, aiRequest, aiReviewTask, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
+import { discoverGeminiModel, aiCategorize, aiChat, aiForecastAdvice, aiInsights, aiInvoiceDraft, aiMonthSummary, aiReminderDraft, aiRequest, aiReviewTask, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
 import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, remindInvoice, sendPaymentRequest, sendPayout } from '@/lib/paypal'
 import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
@@ -180,24 +180,37 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
     const user = await requireUser()
     if (!paypalConfigured()) return fail(NO_PAYPAL)
     const mode = 'sandbox' as const
-    const txns = await fetchSandboxTransactions(90)
-    const acct = await accountInfo()
+    const skipped = new Set<string>()
+    const [txns, acct] = await Promise.all([fetchSandboxTransactions(90, skipped), accountInfo()])
     let note = ''
     const payload = await getPayloadClient()
     let imported = 0
-    // Skip transactions already imported, whichever collection they landed in.
-    const fresh = []
-    for (const t of txns) {
+
+    // Balance movements (opening balance, settlements, holds) are not income or expenses. Remove any that an earlier
+    // sync imported, so they stop distorting totals. Only entries whose PayPal transaction is one of these are touched.
+    if (skipped.size) {
+      const gone: Where = { and: [{ source: { equals: 'paypal' } }, { externalId: { in: [...skipped] } }] }
+      const removed = await payload.delete({ collection: 'entries', user, overrideAccess: false, where: gone })
+      if (removed.docs.length) note += ` Removed ${removed.docs.length} balance movement${removed.docs.length === 1 ? '' : 's'} (holds, settlements or opening balance) that are not income or expenses.`
+    }
+    // Skip transactions already imported, whichever collection they landed in. One query per chunk, not per transaction.
+    const have = new Set<string>()
+    const ids = txns.map((t) => t.externalId)
+    for (let i = 0; i < ids.length; i += 200) {
+      const where: Where = { externalId: { in: ids.slice(i, i + 200) } }
       const found = await Promise.all(
         (['subscriptions', 'entries'] as const).map((collection) =>
-          payload.find({ collection, user, overrideAccess: false, where: { externalId: { equals: t.externalId } }, limit: 1, depth: 0 }),
+          payload.find({ collection, user, overrideAccess: false, where, limit: 200, depth: 0, pagination: false, select: { externalId: true } }),
         ),
       )
-      if (!found.some((r) => r.totalDocs)) fresh.push(t)
+      for (const r of found) for (const d of r.docs) if (d.externalId) have.add(d.externalId)
     }
+    const fresh = txns.filter((t) => !have.has(t.externalId))
+    const aiOn = fresh.some((t) => t.amount < 0) && Boolean(await resolveAi())
     const labels = await aiCategorize(fresh.map((t) => ({ id: t.externalId, business: t.business, amount: t.amount, kind: t.kind })))
-    if (labels) note += ` AI categorised ${labels.size} transaction${labels.size === 1 ? '' : 's'}.`
-    for (const raw of fresh) {
+    if (labels) note += ` AI categorised ${labels.size} outgoing payment${labels.size === 1 ? '' : 's'}.`
+    else if (aiOn) note += ' The AI did not answer in time, so simple rules sorted the payments instead.'
+    const importOne = async (raw: (typeof fresh)[number]) => {
       const label = labels?.get(raw.externalId)
       const t = label ? { ...raw, kind: label.kind } : raw
       if (t.kind === 'subscription') {
@@ -244,6 +257,7 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
       }
       imported++
     }
+    for (let i = 0; i < fresh.length; i += 5) await Promise.all(fresh.slice(i, i + 5).map(importOne))
 
     // Entries imported before fees and clients were tracked: fill them in from PayPal's data.
     const byId = new Map(txns.map((t) => [t.externalId, t]))
@@ -1033,10 +1047,30 @@ export async function saveAiSettingsAction(input: { provider: string; model: str
     if (!isProvider(input.provider)) return fail('Choose OpenAI, Claude or Gemini.')
     const key = String(input.key ?? '').trim()
     if (key.length < 20 || key.length > 400 || /\s/.test(key)) return fail('That does not look like an API key. Paste the full key from your provider.')
-    const model = String(input.model ?? '').trim() || PROVIDERS[input.provider].model
+    const typed = String(input.model ?? '').trim()
+    let model: string = typed || PROVIDERS[input.provider].model
     if (!/^[A-Za-z0-9._:-]{1,80}$/.test(model)) return fail('Model names can only use letters, numbers and . _ : -')
-    const test = await aiRequest({ provider: input.provider, key, model, source: 'user', auth: 'key' }, [{ role: 'user', content: 'Reply with the single word: ok' }])
-    if (!test.text) return fail(test.error ?? 'The provider did not answer. Check the key and model.')
+    const provider = input.provider
+    if (provider === 'gemini') {
+      // The model list checks the key in a fraction of a second and tells us which names exist.
+      const found = await discoverGeminiModel({ 'x-goog-api-key': key })
+      if (found.error) return fail(found.error)
+      const others = (m: string) => found.all.filter((n) => n !== m).slice(0, 6).join(', ')
+      if (typed && !found.all.includes(typed)) return fail(`The provider does not know that model name.${found.all.length ? ` Models your key can use include: ${others(typed)}. Type one in the Model box.` : ''}`)
+      if (!typed && found.all.length && !found.all.includes(model) && found.pick) model = found.pick
+    }
+    // A model can be listed yet refuse to generate (for example one retired for new accounts), so also try it once.
+    // A slow answer is not a failure: the key was already accepted above, so only an outright refusal stops the connection.
+    const test = await aiRequest({ provider, key, model, source: 'user', auth: 'key' }, [{ role: 'user', content: 'Reply with the single word: ok' }], false, provider === 'gemini' ? 12_000 : 20_000)
+    const slow = provider === 'gemini' && /took longer/.test(test.error ?? '')
+    if (!test.text && !slow) {
+      if (provider === 'gemini' && /model name/.test(test.error ?? '')) {
+        const found = await discoverGeminiModel({ 'x-goog-api-key': key })
+        const list = found.all.filter((n) => n !== model).slice(0, 6).join(', ')
+        return fail(`The model "${model}" is listed but would not answer.${list ? ` Try another, such as: ${list}.` : ''} Or leave the Model box empty.`)
+      }
+      return fail(test.error ?? 'The provider did not answer. Check the key and model.')
+    }
     await revokeStoredGoogle(user.id)
     const payload = await getPayloadClient()
     await payload.update({
@@ -1045,7 +1079,7 @@ export async function saveAiSettingsAction(input: { provider: string; model: str
       overrideAccess: true,
       data: { aiProvider: input.provider, aiAuth: 'key', aiModel: model, aiKeyHint: key.slice(-4), aiKeyEnc: encryptKey(key) },
     })
-    return { ok: true, data: { label: PROVIDERS[input.provider].label }, message: `${PROVIDERS[input.provider].label} connected.` }
+    return { ok: true, data: { label: PROVIDERS[input.provider].label }, message: `${PROVIDERS[input.provider].label} connected, using ${model}.` }
   } catch (e) {
     return fail(msg(e, 'Could not save the AI account.'))
   }
@@ -1063,7 +1097,7 @@ export async function removeAiSettingsAction(): Promise<ActionResult> {
   }
 }
 
-export async function insightsAction(): Promise<ActionResult<{ insights: Insight[]; ai: boolean }>> {
+export async function insightsAction(): Promise<ActionResult<{ insights: Insight[]; ai: boolean; engine?: string; aiError?: string }>> {
   try {
     const user = await requireUser()
     const [entries, subs] = await Promise.all([loadEntries(user), loadSubscriptions(user)])

@@ -5,7 +5,7 @@ import { insightsAction, removeAiSettingsAction, saveAiSettingsAction } from '@/
 import { rm } from '@/lib/dates'
 import type { Insight } from '@/lib/types'
 import { Icon } from './Icon'
-import { btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
 const KINDS: Record<Insight['kind'], { label: string; badge: string }> = {
   unusual: { label: 'Unusual spending', badge: 'bg-berry-100 text-berry-500' },
@@ -40,7 +40,7 @@ function AiAccount({ engine, own, serverKey, providers, google }: { engine: stri
   return (
     <section className={`${card} mb-6 p-5`}>
       <h2 className="mb-1 text-lg font-extrabold">Your AI account</h2>
-      <p className="mb-3 text-sm text-peel-700">
+      <p className="mb-3 text-sm font-bold text-peel-900">
         {own
           ? own.auth === 'google'
             ? `Using Gemini, signed in with Google as ${own.hint || 'your account'} (model ${own.model}).`
@@ -156,7 +156,9 @@ function Overview({ clients, fees }: { clients: Clients; fees: Fees }) {
 
 export function InsightsClient({ engine, own, serverKey, providers, google, clients, fees }: { engine: string; own: Own | null; serverKey: boolean; providers: { id: string; label: string; model: string }[]; google: Google; clients: Clients; fees: Fees }) {
   const act = useAction()
-  const [result, setResult] = useState<{ insights: Insight[]; ai: boolean } | null>(null)
+  const [result, setResult] = useState<{ insights: Insight[]; ai: boolean; engine?: string; aiError?: string } | null>(null)
+  const [dismissed, setDismissed] = useState(false)
+  const disconnect = useAction()
 
   return (
     <div className="max-w-3xl">
@@ -183,17 +185,31 @@ export function InsightsClient({ engine, own, serverKey, providers, google, clie
           </ul>
         </details>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button className={btnPrimary} disabled={act.pending} onClick={() => act.run(() => insightsAction(), (r) => setResult(r.data ?? null))}>
+          <button className={btnPrimary} disabled={act.pending} onClick={() => { setDismissed(false); act.run(() => insightsAction(), (r) => setResult(r.data ?? null)) }}>
             <Icon name="sparkle" /> {act.pending ? 'Analysing...' : result ? 'Analyse again' : 'Analyse my spending'}
           </button>
           <Feedback error={act.error} />
         </div>
       </section>
 
+      {result?.aiError && !dismissed && (
+        <section role="alert" className={`${card} mb-4 border-berry-500 p-4`}>
+          <p className="font-extrabold text-berry-500">Your AI account did not answer</p>
+          <p className="mt-1 text-sm text-peel-700">{result.aiError} Simple built-in rules were used for the findings below. You can keep the connection and try again later, or disconnect this AI account.</p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button type="button" className={btnGhost} onClick={() => setDismissed(true)}>Keep connection</button>
+            <button type="button" className={btnDanger} disabled={disconnect.pending} onClick={() => disconnect.run(() => removeAiSettingsAction(), () => { setDismissed(true); setResult((r) => (r ? { ...r, aiError: undefined } : r)) })}>
+              {disconnect.pending ? 'Disconnecting...' : 'Disconnect AI account'}
+            </button>
+            <Feedback error={disconnect.error} />
+          </div>
+        </section>
+      )}
+
       {result && (
         <>
           <p className="mb-3 text-sm font-bold text-peel-700">
-            <span className="mr-2 rounded-full bg-banana-200 px-2 py-0.5 text-xs font-bold text-peel-900">{result.ai ? 'AI analysis' : 'Rule-based analysis'}</span>
+            <span className="mr-2 rounded-full bg-banana-200 px-2 py-0.5 text-xs font-bold text-peel-900">{result.ai ? `AI analysis by ${result.engine ?? 'your AI account'}` : 'Rule-based analysis'}</span>
             {result.insights.length} finding{result.insights.length === 1 ? '' : 's'}
           </p>
           <ul className="space-y-3">

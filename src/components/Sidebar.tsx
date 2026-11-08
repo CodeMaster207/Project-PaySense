@@ -58,7 +58,7 @@ export function Sidebar({ email, onRender = false }: { email: string; onRender?:
           <Icon name={collapsed ? 'right' : 'left'} />
         </button>
       </div>
-      <nav className="flex flex-col gap-1">
+      <nav className="flex flex-col gap-1 pb-10">
         {nav.map((n) => {
           const active = n.href === '/' ? path === '/' : path.startsWith(n.href)
           return (
@@ -75,7 +75,7 @@ export function Sidebar({ email, onRender = false }: { email: string; onRender?:
           )
         })}
       </nav>
-      <div className={`mt-auto rounded-xl bg-white text-sm ${collapsed ? 'p-2' : 'p-3'}`}>
+      <div className={`mt-auto shrink-0 rounded-xl bg-white text-sm ${collapsed ? 'p-2' : 'p-3'}`}>
         {!collapsed && <p className="truncate font-semibold" title={email}>{email}</p>}
         <button
           type="button"
