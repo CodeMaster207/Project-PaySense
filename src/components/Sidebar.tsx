@@ -17,7 +17,7 @@ const nav: { href: string; label: string; icon: IconName }[] = [
   { href: '/insights', label: 'AI Insights', icon: 'sparkle' },
 ]
 
-export function Sidebar({ email }: { email: string }) {
+export function Sidebar({ email, onRender = false }: { email: string; onRender?: boolean }) {
   const path = usePathname()
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
@@ -88,6 +88,11 @@ export function Sidebar({ email }: { email: string }) {
           <Icon name="logout" className="size-4" /> {!collapsed && 'Sign out'}
         </button>
       </div>
+      {onRender && !collapsed && (
+        <p className="mt-2 text-center text-xs font-semibold text-peel-500">
+          Hosted on <span className="font-extrabold text-peel-700">Render</span> with Postgres
+        </p>
+      )}
     </aside>
   )
 }

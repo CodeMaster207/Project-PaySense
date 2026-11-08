@@ -14,6 +14,7 @@ export const Entries: CollectionConfig = {
     { name: 'amount', type: 'number', required: true, min: 0 },
     { name: 'source', type: 'select', defaultValue: 'manual', options: ['manual', 'paypal'] },
     { name: 'externalId', type: 'text', index: true },
+    { name: 'paypalAccountId', type: 'text', index: true },
     { name: 'originalCurrency', type: 'text' },
     { name: 'originalAmount', type: 'number' },
   ],

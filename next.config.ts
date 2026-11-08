@@ -19,7 +19,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(dirname),
   },
-  output: 'standalone',
   images: {
     loader: 'custom',
     loaderFile: './figma-image-loader.ts',
@@ -34,7 +33,8 @@ const nextConfig: NextConfig = {
     cpus: 2,
   },
   env: {
-    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000',
+    // RENDER_EXTERNAL_URL is set by Render, so the deployed site knows its own address without extra setup.
+    NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3000',
   },
 }
 

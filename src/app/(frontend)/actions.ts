@@ -1,10 +1,11 @@
 'use server'
 
+import type { Where } from 'payload'
 import { getPayloadClient } from '@/lib/payload'
 import { endAppSession, getAppUser, startAppSession } from '@/lib/app-auth'
 import { decryptKey, encryptKey, isProvider, PROVIDERS, revokeGoogleToken } from '@/lib/ai-config'
 import { aiCategorize, aiChat, aiInsights, aiRequest, aiPickGoal, aiPlan, aiSuggestGoals, matchSubscription } from '@/lib/ai'
-import { type PayPalTxn, accountCurrency, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
+import { type PayPalTxn, accountCurrency, accountInfo, cancelPayPalSubscription, categoryFor, checkPayPalConnection, fetchSandboxTransactions, paymentRequestStatus, paypalConfigured, sendPaymentRequest, sendPayout } from '@/lib/paypal'
 import { addDays, daysBetween, isDay, rm, today } from '@/lib/dates'
 import { isCurrency } from '@/lib/money'
 import { getRates } from '@/lib/rates'
@@ -125,6 +126,7 @@ export async function sendPayPalExpenseAction(input: { date: string; description
         amount,
         source: 'paypal',
         externalId: out.transactionId ?? `payout-${out.batchId}`,
+        paypalAccountId: (await accountInfo()).id ?? undefined,
         originalCurrency: currency,
         originalAmount: sent,
       },
@@ -175,6 +177,7 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
     if (!paypalConfigured()) return fail(NO_PAYPAL)
     const mode = 'sandbox' as const
     const txns = await fetchSandboxTransactions(90)
+    const acct = await accountInfo()
     let note = ''
     const payload = await getPayloadClient()
     let imported = 0
@@ -209,6 +212,7 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
             source: 'paypal',
             externalId: t.externalId,
             paypalSubscriptionId: t.subscriptionId,
+            paypalAccountId: acct.id ?? undefined,
             originalCurrency: t.currency,
             originalAmount: Math.abs(t.originalAmount),
           },
@@ -226,12 +230,41 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
             amount: Math.abs(t.amount),
             source: 'paypal',
             externalId: t.externalId,
+            paypalAccountId: acct.id ?? undefined,
             originalCurrency: t.currency,
             originalAmount: Math.abs(t.originalAmount),
           },
         })
       }
       imported++
+    }
+
+    // Records imported before accounts were tracked: confirm the ones that belong to this account, and mark the
+    // rest as unverified so the PayPal page can ask whether to delete them.
+    if (acct.id) {
+      const known = new Set(txns.map((t) => t.externalId))
+      const since = addDays(today(), -90)
+      const unstamped: Where = { and: [{ source: { equals: 'paypal' } }, { paypalAccountId: { exists: false } }] }
+      const [oldEntries, oldSubs] = await Promise.all([
+        payload.find({ collection: 'entries', user, overrideAccess: false, where: unstamped, limit: 1000, depth: 0, pagination: false }),
+        payload.find({ collection: 'subscriptions', user, overrideAccess: false, where: unstamped, limit: 1000, depth: 0, pagination: false }),
+      ])
+      let unverified = 0
+      for (const d of oldEntries.docs) {
+        if (!d.externalId) continue
+        // Only records inside the 90-day window can be checked; older ones are left alone.
+        const mark = known.has(d.externalId) ? acct.id : d.date >= since ? 'unverified' : null
+        if (!mark) continue
+        if (mark === 'unverified') unverified++
+        await payload.update({ collection: 'entries', id: d.id, user, overrideAccess: false, data: { paypalAccountId: mark } })
+      }
+      for (const d of oldSubs.docs) {
+        if (!d.externalId) continue
+        const mark = known.has(d.externalId) ? acct.id : 'unverified'
+        if (mark === 'unverified') unverified++
+        await payload.update({ collection: 'subscriptions', id: d.id, user, overrideAccess: false, data: { paypalAccountId: mark } })
+      }
+      if (unverified) note += ` ${unverified} older record${unverified === 1 ? '' : 's'} did not match this PayPal account.`
     }
     await payload.update({
       collection: 'users',
@@ -242,6 +275,27 @@ export async function syncPayPalAction(): Promise<ActionResult<{ imported: numbe
     return { ok: true, data: { imported, mode }, message: `Imported ${imported} new transaction${imported === 1 ? '' : 's'}.${note}` }
   } catch (e) {
     return fail(msg(e, 'PayPal sync failed.'))
+  }
+}
+
+/** Deletes PayPal records that came from a different PayPal account than the one connected now. */
+export async function deleteForeignPayPalRecordsAction(): Promise<ActionResult<{ deleted: number }>> {
+  try {
+    const user = await requireUser()
+    if (!paypalConfigured()) return fail(NO_PAYPAL)
+    // The set to delete is worked out here from the connected account, never taken from the browser.
+    const acct = await accountInfo()
+    if (!acct.id) return fail('Could not read the connected PayPal account. Try again in a moment.')
+    const payload = await getPayloadClient()
+    const where: Where = { and: [{ source: { equals: 'paypal' } }, { paypalAccountId: { exists: true } }, { paypalAccountId: { not_equals: acct.id } }] }
+    const [entries, subs] = await Promise.all([
+      payload.delete({ collection: 'entries', user, overrideAccess: false, where }),
+      payload.delete({ collection: 'subscriptions', user, overrideAccess: false, where }),
+    ])
+    const deleted = entries.docs.length + subs.docs.length
+    return { ok: true, data: { deleted }, message: `Deleted ${deleted} record${deleted === 1 ? '' : 's'} from the other PayPal account.` }
+  } catch (e) {
+    return fail(msg(e, 'Could not delete those records.'))
   }
 }
 

@@ -1,0 +1,38 @@
+# Render Blueprint: one web service plus a Postgres database.
+# Create it from the Render dashboard with New > Blueprint and pick this repository.
+services:
+  - type: web
+    name: paysense
+    runtime: node
+    region: singapore
+    plan: free
+    # --prod=false keeps the dev dependencies (Tailwind, TypeScript, cross-env) that the build needs.
+    buildCommand: npm install -g pnpm@12.18.0 && pnpm install --frozen-lockfile --prod=false && pnpm build
+    startCommand: pnpm start
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: PAYLOAD_SECRET
+        generateValue: true
+      - key: DATABASE_URI
+        fromDatabase:
+          name: paysense-db
+          property: connectionString
+      # PayPal sandbox app (Business account) with Transaction Search, Invoicing and Payouts turned on.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      # Optional: a server-wide AI key. Users can also connect their own on the AI Insights page.
+      - key: APP_OPENAI_API_KEY
+        sync: false
+      # Optional: Gemini sign-in. Add https://<your-app>.onrender.com/ai/google/callback as a redirect URI.
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+databases:
+  - name: paysense-db
+    region: singapore
+    plan: free

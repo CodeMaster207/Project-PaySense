@@ -56,6 +56,32 @@ pnpm dev
 
 Open http://localhost:3000, choose **Sign up**, and create an account. The database is a local SQLite file (`payload.db`) that is created on first run. The CMS admin panel is at http://localhost:3000/admin.
 
+## Deploy to Render
+
+PaySense includes a `render.yaml` Blueprint that creates a web service and a Postgres database on [Render](https://render.com).
+
+1. Push this repository to GitHub.
+2. In Render choose **New, Blueprint** and select the repository. Render reads `render.yaml` and creates `paysense` (the web app) and `paysense-db` (Postgres).
+3. When asked, enter `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` from your sandbox app. `APP_OPENAI_API_KEY`, `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are optional.
+4. Render builds and starts the app. Open the `onrender.com` address it gives you, sign up, and create the first admin at `/admin`.
+
+How it works:
+- **Database:** the app picks its database from `DATABASE_URI`. A `postgres://` address (which Render fills in from `paysense-db`) uses Postgres. A `file:` address, the local default, uses a SQLite file, so you can run it locally without installing Postgres.
+- **Tables:** in production Payload does not create tables itself. The app applies the files in `src/migrations` when it starts, so the database sets itself up on the first deploy.
+- **Site address:** the app uses Render's `RENDER_EXTERNAL_URL` as its public address, so no extra setting is needed. For Gemini sign-in, add `https://<your-app>.onrender.com/ai/google/callback` as an authorised redirect URI in Google Cloud.
+
+If you change a collection (add or rename a field), create a new migration and commit it before deploying:
+
+```sh
+DATABASE_URI=postgres://user:pass@localhost:5432/paysense pnpm payload migrate:create describe_the_change
+```
+
+This only needs a Postgres-style address to choose the right database type. It does not connect to a database. Local SQLite development needs no migrations.
+
+Good to know:
+- Free Render web services go to sleep when idle and take a short while to wake up. Free Render databases are time-limited, so check Render's current free-plan terms before relying on one for judging.
+- Files uploaded through the admin panel are stored on the server's disk and are lost on redeploy. PaySense itself does not use uploads.
+
 ## PayPal sandbox setup
 
 1. Go to developer.paypal.com and open **Testing Tools, Sandbox Accounts**. Use a **Business** account for the app. Create a Personal account to act as a customer.
@@ -85,7 +111,7 @@ Without any AI account, the app uses its built-in rules and still runs end to en
 | Variable | Needed | Purpose |
 | --- | --- | --- |
 | `PAYLOAD_SECRET` | Yes | Signs sessions and encrypts stored AI keys. Use a long random string. |
-| `DATABASE_URI` | Yes | SQLite file, `file:./payload.db`. |
+| `DATABASE_URI` | Yes | `file:./payload.db` for local SQLite, or a `postgres://` URL for Postgres. Render sets this for you. |
 | `NEXT_PUBLIC_SITE_URL` | Yes | Base URL, `http://localhost:3000` locally. |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | For PayPal | Sandbox app credentials. |
 | `PAYPAL_ACCESS_TOKEN` | No | A pre-issued sandbox token, for hosts that block the token request. |
@@ -96,7 +122,7 @@ Without any AI account, the app uses its built-in rules and still runs end to en
 
 ## Built with
 
-Next.js 16 (App Router), Payload CMS (data and sign-in), SQLite, Tailwind CSS v4, **AG Grid Community** (the PayPal transactions and subscriptions tables), the PayPal REST APIs (OAuth, Transaction Search, Reporting balances, Invoicing, Subscriptions), and the OpenAI, Anthropic and Gemini APIs.
+Next.js 16 (App Router), Payload CMS (data and sign-in), SQLite locally and Postgres in production, hosted on **Render**, Tailwind CSS v4, **AG Grid Community** (the PayPal transactions and subscriptions tables), the PayPal REST APIs (OAuth, Transaction Search, Reporting balances, Invoicing, Subscriptions), and the OpenAI, Anthropic and Gemini APIs.
 
 ## How AG Grid is integrated
 

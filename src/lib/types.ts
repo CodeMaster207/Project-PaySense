@@ -7,6 +7,8 @@ export type EntryView = {
   source: 'manual' | 'paypal' | 'goal' | 'job'
   /** PayPal transaction ID for entries imported from PayPal. */
   externalId?: string
+  /** The PayPal account the transaction was imported from. */
+  paypalAccountId?: string
   /** What PayPal reported before conversion to RM. */
   originalCurrency?: string
   originalAmount?: number
@@ -30,6 +32,8 @@ export type SubscriptionView = {
   note: string
   /** Tied to a PayPal transaction, either imported from PayPal or linked by hand. */
   linked: boolean
+  source: 'manual' | 'paypal'
+  paypalAccountId?: string
   originalCurrency?: string
   originalAmount?: number
   paypalTransactionId: string

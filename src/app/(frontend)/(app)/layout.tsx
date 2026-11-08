@@ -11,7 +11,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <CurrencyProvider code={user.currency ?? 'MYR'} rates={rates} source={source}>
       <div className="flex min-h-screen">
-        <Sidebar email={user.email} />
+        <Sidebar email={user.email} onRender={Boolean(process.env.RENDER)} />
         <main className="min-w-0 flex-1 p-8">{children}</main>
       </div>
     </CurrencyProvider>

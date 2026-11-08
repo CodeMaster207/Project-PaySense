@@ -467,6 +467,7 @@ export interface Entry {
   amount: number;
   source?: ('manual' | 'paypal') | null;
   externalId?: string | null;
+  paypalAccountId?: string | null;
   originalCurrency?: string | null;
   originalAmount?: number | null;
   createdBy?:
@@ -508,6 +509,7 @@ export interface Subscription {
   source?: ('manual' | 'paypal') | null;
   externalId?: string | null;
   paypalSubscriptionId?: string | null;
+  paypalAccountId?: string | null;
   originalCurrency?: string | null;
   originalAmount?: number | null;
   createdBy?:
@@ -930,6 +932,7 @@ export interface EntriesSelect<T extends boolean = true> {
   amount?: T;
   source?: T;
   externalId?: T;
+  paypalAccountId?: T;
   originalCurrency?: T;
   originalAmount?: T;
   createdBy?: T;
@@ -954,6 +957,7 @@ export interface SubscriptionsSelect<T extends boolean = true> {
   source?: T;
   externalId?: T;
   paypalSubscriptionId?: T;
+  paypalAccountId?: T;
   originalCurrency?: T;
   originalAmount?: T;
   createdBy?: T;

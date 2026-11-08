@@ -2,14 +2,15 @@
 
 import { useRef, useState } from 'react'
 import type { GridApi } from 'ag-grid-community'
-import { connectPayPalAction, syncPayPalAction } from '@/app/(frontend)/actions'
+import { connectPayPalAction, deleteForeignPayPalRecordsAction, syncPayPalAction } from '@/app/(frontend)/actions'
+import { prettyDay, rm } from '@/lib/dates'
 import { currentCode } from '@/lib/money'
 import type { EntryView, SubscriptionView } from '@/lib/types'
 import { DatePicker } from './DatePicker'
 import { GridCaption } from './grid/GridCaption'
 import { PayPalGrid } from './grid/PayPalGrid'
 import { Icon } from './Icon'
-import { btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
+import { btnDanger, btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
 type Type = 'all' | 'incomes' | 'expenses' | 'goals'
 type Row = { key: string; date: string; business: string; amount: number; group: 'incomes' | 'expenses' | 'goals'; tag: string; txnId: string; original: string }
@@ -29,6 +30,9 @@ export function PayPalClient({
   lastSync,
   mode,
   accountCurrency,
+  accountId,
+  foreign,
+  unchecked,
   entries,
   subs,
   goalFunds,
@@ -37,6 +41,9 @@ export function PayPalClient({
   lastSync: string | null
   mode: 'sandbox' | 'unconfigured'
   accountCurrency: string | null
+  accountId: string | null
+  foreign: { name: string; amount: number; date: string }[]
+  unchecked: number
   entries: EntryView[]
   subs: SubscriptionView[]
   goalFunds: EntryView[]
@@ -46,6 +53,8 @@ export function PayPalClient({
   const [to, setTo] = useState('')
   const [search, setSearch] = useState('')
   const [printing, setPrinting] = useState(false)
+  const [keepForeign, setKeepForeign] = useState(false)
+  const del = useAction()
   const gridApi = useRef<GridApi | null>(null)
   const act = useAction()
 
@@ -66,6 +75,11 @@ export function PayPalClient({
           Status: {connected ? 'Successfully Connected' : 'Not connected'}
         </span>
         {lastSync && <span className="text-sm text-peel-700">Last sync {new Date(lastSync).toLocaleString('en-GB')}</span>}
+        {accountId && (
+          <span className="text-sm text-peel-700" title="PayPal does not share the account email with this kind of connection, so the account ID identifies it.">
+            Connected PayPal account ID: <b className="font-mono">{accountId}</b>
+          </span>
+        )}
         {accountCurrency && (
           <span className="text-sm text-peel-700">
             PayPal account currency: <b>{accountCurrency}</b>{accountCurrency === 'MYR' ? '' : ', converted to RM on import'}
@@ -99,6 +113,39 @@ export function PayPalClient({
           </ul>
         </details>
       </section>
+
+      {foreign.length > 0 && !keepForeign && (
+        <section role="alert" className="mb-6 rounded-2xl border-2 border-berry-500 bg-berry-100 p-5">
+          <h2 className="text-lg font-extrabold text-berry-500">
+            {foreign.length} record{foreign.length === 1 ? '' : 's'} came from a different PayPal account
+          </h2>
+          <p className="mt-1 text-sm text-peel-700">
+            The connected account is <b className="font-mono">{accountId}</b>. These records were imported from another account, so they are mixed into your totals.
+            Do you want to delete them?
+          </p>
+          <ul className="mt-3 space-y-1 text-sm">
+            {foreign.slice(0, 5).map((f, i) => (
+              <li key={i} className="flex justify-between gap-3 rounded-lg bg-white px-3 py-1.5">
+                <span className="min-w-0 truncate font-semibold">{f.name}</span>
+                <span className="shrink-0 text-peel-700">{f.date ? prettyDay(f.date) : ''} · {rm(f.amount)}</span>
+              </li>
+            ))}
+            {foreign.length > 5 && <li className="px-1 text-peel-700">and {foreign.length - 5} more</li>}
+          </ul>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button className={btnDanger} disabled={del.pending} onClick={() => del.run(() => deleteForeignPayPalRecordsAction())}>
+              {del.pending ? 'Deleting...' : `Yes, delete ${foreign.length} record${foreign.length === 1 ? '' : 's'}`}
+            </button>
+            <button className={btnGhost} disabled={del.pending} onClick={() => setKeepForeign(true)}>No, keep them</button>
+            <Feedback error={del.error} notice={del.notice} />
+          </div>
+        </section>
+      )}
+      {unchecked > 0 && foreign.length === 0 && (
+        <p className="mb-6 rounded-xl border-2 border-banana-300 bg-banana-50 px-4 py-2 text-sm text-peel-700">
+          {unchecked} older record{unchecked === 1 ? ' has' : 's have'} not been checked against this PayPal account yet. Press <b>Resync</b> to check them.
+        </p>
+      )}
 
       <div className="grid grid-cols-[auto_1fr] gap-x-10 gap-y-4">
         <div>

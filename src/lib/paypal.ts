@@ -114,17 +114,23 @@ export async function fetchSandboxTransactions(days = 90): Promise<PayPalTxn[]> 
   return out
 }
 
-/** The currency the PayPal account holds, read from its primary balance. Null if PayPal does not say. */
-export async function accountCurrency(): Promise<string | null> {
+/**
+ * The connected PayPal account's ID and the currency it holds (its primary balance). PayPal does not share the
+ * account email with this kind of app connection, so the ID is what identifies the account.
+ */
+export async function accountInfo(): Promise<{ id: string | null; currency: string | null }> {
   try {
     const res = await fetch(`${BASE}/v1/reporting/balances?currency_code=ALL`, { headers: { Authorization: `Bearer ${await token()}` }, cache: 'no-store' })
-    if (!res.ok) return null
-    const balances = ((await res.json()) as { balances?: { currency?: string; primary?: boolean }[] }).balances ?? []
-    return (balances.find((b) => b.primary) ?? balances[0])?.currency?.toUpperCase() ?? null
+    if (!res.ok) return { id: null, currency: null }
+    const json = (await res.json()) as { account_id?: string; balances?: { currency?: string; primary?: boolean }[] }
+    const balances = json.balances ?? []
+    return { id: json.account_id ?? null, currency: (balances.find((b) => b.primary) ?? balances[0])?.currency?.toUpperCase() ?? null }
   } catch {
-    return null
+    return { id: null, currency: null }
   }
 }
+
+export const accountCurrency = async () => (await accountInfo()).currency
 
 async function invoiceError(res: Response) {
   if (res.status === 401 || res.status === 403) return 'PayPal refused the request. Turn on "Invoicing" for your sandbox app (Apps & Credentials, your app, Features) and try again.'

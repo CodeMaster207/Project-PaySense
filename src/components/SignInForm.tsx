@@ -27,8 +27,8 @@ export function SignInForm() {
     <div className="grid min-h-screen place-items-center p-6">
       <div className={`${card} w-full max-w-md p-8`}>
         <div className="mb-6 text-center">
-          <span className="mx-auto mb-3 grid size-14 place-items-center rounded-2xl bg-banana-300">
-            <Icon name="sparkle" className="size-8" />
+          <span className="mx-auto mb-3 block w-fit rounded-2xl bg-white p-1">
+            <img src="/logo.png" alt="PaySense logo" width={56} height={56} className="block size-14 rounded-xl" style={{ imageRendering: 'pixelated' }} />
           </span>
           <h1 className="text-3xl font-extrabold">Sign-in!</h1>
           <p className="mt-1 text-sm text-peel-700">Plan goals with AI. Track money with PayPal sandbox.</p>
