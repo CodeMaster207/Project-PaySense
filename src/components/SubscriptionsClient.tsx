@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { createSubscriptionAction, linkSubscriptionAction, suggestPayPalMatchAction, updateSubscriptionAction } from '@/app/(frontend)/actions'
 import { prettyDay, rm, today } from '@/lib/dates'
 import type { PayPalMatch, SubscriptionView } from '@/lib/types'
+import { GridCaption } from './grid/GridCaption'
+import { SubscriptionsGrid } from './grid/SubscriptionsGrid'
 import { Icon } from './Icon'
 import { AiNote, PageTitle, btnDanger, btnGhost, btnPrimary, card, Feedback, useAction } from './ui'
 
@@ -143,6 +145,9 @@ function AddForm({ onDone }: { onDone: (id?: string) => void }) {
   )
 }
 
+const renewDateOf = (s: SubscriptionView) => s.renewDate
+const terminationDateOf = (s: SubscriptionView) => s.terminationDate
+
 export function SubscriptionsClient({ subs }: { subs: SubscriptionView[] }) {
   const [id, setId] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -154,18 +159,6 @@ export function SubscriptionsClient({ subs }: { subs: SubscriptionView[] }) {
   const cats = Object.keys(palette)
     .map((c) => ({ c, v: active.filter((s) => s.category === c).reduce((a, s) => a + s.amount, 0) }))
     .filter((x) => x.v > 0)
-
-  const Row = ({ s, third }: { s: SubscriptionView; third: string }) => (
-    <tr onClick={() => setId(s.id)} className={`cursor-pointer border-t border-banana-100 ${sel?.id === s.id ? 'bg-banana-200' : 'hover:bg-banana-50'}`}>
-      <td className="px-3 py-2 font-bold">{s.name}</td>
-      <td className="px-3 py-2">{s.category}</td>
-      <td className="px-3 py-2">{third ? prettyDay(third) : '-'}</td>
-      <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-xs font-bold ${s.status === 'active' ? 'bg-leaf-100 text-leaf-700' : 'bg-berry-100 text-berry-500'}`}>{s.status}</span></td>
-    </tr>
-  )
-  const head = (third: string) => (
-    <thead className="bg-banana-100 text-left text-sm"><tr><th className="px-3 py-2">App/Service</th><th className="px-3 py-2">Category</th><th className="px-3 py-2">{third}</th><th className="px-3 py-2">Status</th></tr></thead>
-  )
 
   return (
     <div>
@@ -201,17 +194,17 @@ export function SubscriptionsClient({ subs }: { subs: SubscriptionView[] }) {
         <div className="space-y-6">
           <section>
             <h2 className="mb-2 text-xl font-extrabold">Active Subscriptions</h2>
-            <div className={`${card} overflow-hidden`}><table className="w-full">{head('Renew Date')}<tbody>
-              {active.map((s) => <Row key={s.id} s={s} third={s.renewDate} />)}
-              {!active.length && <tr><td colSpan={4} className="px-3 py-4 text-sm text-peel-500">None active.</td></tr>}
-            </tbody></table></div>
+            <div className={`${card} overflow-hidden`}>
+              <SubscriptionsGrid subs={active} dateHeader="Renew Date" dateOf={renewDateOf} selectedId={sel?.id ?? null} onSelect={setId} empty="None active." />
+            </div>
+            <GridCaption>Click a row to see its details and PayPal link. Click a column header to sort.</GridCaption>
           </section>
           <section>
             <h2 className="mb-2 text-xl font-extrabold">Cancelled Subscriptions</h2>
-            <div className={`${card} overflow-hidden`}><table className="w-full">{head('Termination Date')}<tbody>
-              {cancelled.map((s) => <Row key={s.id} s={s} third={s.terminationDate} />)}
-              {!cancelled.length && <tr><td colSpan={4} className="px-3 py-4 text-sm text-peel-500">None cancelled.</td></tr>}
-            </tbody></table></div>
+            <div className={`${card} overflow-hidden`}>
+              <SubscriptionsGrid subs={cancelled} dateHeader="Termination Date" dateOf={terminationDateOf} selectedId={sel?.id ?? null} onSelect={setId} empty="None cancelled." />
+            </div>
+            <GridCaption>Click a row to see its details. Click a column header to sort.</GridCaption>
           </section>
         </div>
 

@@ -19,6 +19,8 @@
     "@payloadcms/richtext-lexical": "4.0.0-beta.6",
     "@payloadcms/translations": "4.0.0-beta.6",
     "@payloadcms/ui": "4.0.0-beta.6",
+    "ag-grid-community": "^36.3.0",
+    "ag-grid-react": "^36.3.0",
     "graphql": "^16.8.1",
     "html-react-parser": "^5.2.10",
     "monaco-editor": "0.55.1",

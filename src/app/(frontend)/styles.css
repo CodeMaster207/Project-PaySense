@@ -85,3 +85,8 @@
 .figma-bypass-link:focus {
   transform: translateY(0);
 }
+
+/* AG Grid: highlight the selected subscription row */
+.ag-row-selected-sub {
+  background-color: var(--color-banana-200) !important;
+}

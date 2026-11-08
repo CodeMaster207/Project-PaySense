@@ -11,7 +11,7 @@ A web app that connects to the **PayPal sandbox** and uses **AI** to make sense 
 | **Incomes** | Add a **job** (salary), a **contract** (fixed-term self-employed work) or one-off **revenue**. **Request payment** sends a real PayPal invoice to another PayPal account and tracks it as pending or paid. |
 | **Goals / Plans** | Describe a savings goal and the AI drafts a daily plan. Refine it, skip days, and let the AI suggest goals. |
 | **Subscriptions** | Add subscriptions, link each one to its PayPal transaction (the AI suggests the match), and cancel it in PayPal when PayPal supplied a subscription ID. |
-| **PayPal Integration** | Connect your sandbox account, sync the last 90 days, filter by type and date, and see each transaction ID. Amounts in other currencies are converted to RM and the original is kept. |
+| **PayPal Integration** | Connect your sandbox account, sync the last 90 days, and see each transaction ID in an **AG Grid** table you can sort, filter per column, search, page through and export to CSV. Amounts in other currencies are converted to RM and the original is kept. |
 | **AI Insights** | One click analysis of your recent transactions, plus the page where you connect your own AI account. |
 
 ## AI features
@@ -96,7 +96,58 @@ Without any AI account, the app uses its built-in rules and still runs end to en
 
 ## Built with
 
-Next.js 16 (App Router), Payload CMS (data and sign-in), SQLite, Tailwind CSS v4, the PayPal REST APIs (OAuth, Transaction Search, Reporting balances, Invoicing, Subscriptions), and the OpenAI, Anthropic and Gemini APIs.
+Next.js 16 (App Router), Payload CMS (data and sign-in), SQLite, Tailwind CSS v4, **AG Grid Community** (the PayPal transactions and subscriptions tables), the PayPal REST APIs (OAuth, Transaction Search, Reporting balances, Invoicing, Subscriptions), and the OpenAI, Anthropic and Gemini APIs.
+
+## How AG Grid is integrated
+
+PaySense uses the free **AG Grid Community** edition (`ag-grid-community` and `ag-grid-react`, MIT licensed) for its two data-heavy tables: the PayPal transactions on **PayPal Integration** and the lists on **Subscriptions**.
+
+### Where it lives
+
+| File | Role |
+| --- | --- |
+| `src/components/grid/gridSetup.ts` | Registers the AG Grid features the app uses and defines the shared theme. |
+| `src/components/grid/PayPalGrid.tsx` | The PayPal transactions grid: columns, cell renderers and grid options. |
+| `src/components/grid/SubscriptionsGrid.tsx` | The grid used for the active and cancelled subscription lists. |
+| `src/components/PayPalClient.tsx` | The page around the PayPal grid: builds the rows, the Type and date filters, search, CSV export and print. |
+| `src/components/SubscriptionsClient.tsx` | The Subscriptions page: handles row selection and shows the selected subscription's details. |
+| `src/app/(frontend)/styles.css` | One style rule that highlights the selected subscription row. |
+
+### How the data reaches the grid
+
+1. A server page loads your records from the database (PayPal-imported entries, subscriptions and planned goal funding).
+2. A client component turns them into plain rows. For PayPal, three sources are merged into one list: imported PayPal transactions, subscriptions, and goal funds.
+3. The grid receives the rows as `rowData`. AG Grid's client-side row model holds them in the browser, which suits the few hundred records a sandbox account produces.
+
+### Setup (`gridSetup.ts`)
+
+- **Only the features in use are registered** with `ModuleRegistry`: client-side row model, pagination, CSV export, quick filter, text, number and date filters, and cell and row styling. Registering everything would make the page heavier.
+- **Theme:** the grid starts from AG Grid's Quartz theme and overrides its colours, header weight, borders, row hover and font to match the app's banana-yellow look and Nunito font.
+
+### What each grid does
+
+**PayPal transactions (`PayPalGrid.tsx`)**
+- **Columns:** Date, Business (with a type badge), Transaction ID in monospace, and Amount.
+- **Sorting and filtering:** every column sorts. Business and Transaction ID have text filters, Amount has a number filter, and Date has a date filter. The date column stores ISO strings, so a custom comparator converts them to dates for the filter.
+- **Custom cells:** React cell renderers draw the badge and the green or red amount. The amount cell also shows the original currency (for example `USD 5,000.00`) under the converted RM figure.
+- **Search:** the search box above the table feeds the grid's quick filter, which matches across all columns.
+- **Paging:** 10 rows per page, with a choice of 10, 25 or 50.
+- **Stable rows:** each row has a fixed ID, so the grid keeps its sort, filter and scroll position when data refreshes after a sync.
+
+**Around the PayPal grid (`PayPalClient.tsx`)**
+- The **Type** buttons (All, Incomes, Expenses, Goal funds) and the **date range** pick which rows are passed to the grid. The grid's own column filters then narrow them further.
+- **Export CSV** calls the grid's `exportDataAsCsv`, which saves what is currently shown (after filtering and sorting) as a file.
+- **Print Record** temporarily switches the grid to its print layout. Without this, pagination would hide rows from the printout.
+- The grid is **keyed by the display currency**, so it redraws when you change currency and the RM amounts stay correct.
+
+**Subscriptions (`SubscriptionsGrid.tsx`)**
+- Two grids, active and cancelled, with sortable columns for service, category, renew or termination date, and status.
+- Clicking a row tells the page which subscription is selected, which opens its details and the PayPal link card. The selected row gets a highlight class.
+
+### Limits to know about
+
+- Only **Community** features are used. Enterprise features such as row grouping and expandable detail rows are not, so no licence is needed.
+- Rows are filtered and sorted in the browser rather than on the server. That is fine at this size and would need AG Grid's server-side row model for very large histories.
 
 ## Security and privacy
 

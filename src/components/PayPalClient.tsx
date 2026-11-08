@@ -1,10 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { GridApi } from 'ag-grid-community'
 import { connectPayPalAction, syncPayPalAction } from '@/app/(frontend)/actions'
-import { prettyDay, rm } from '@/lib/dates'
+import { currentCode } from '@/lib/money'
 import type { EntryView, SubscriptionView } from '@/lib/types'
 import { DatePicker } from './DatePicker'
+import { GridCaption } from './grid/GridCaption'
+import { PayPalGrid } from './grid/PayPalGrid'
 import { Icon } from './Icon'
 import { btnGhost, btnPrimary, card, Feedback, PageTitle, useAction } from './ui'
 
@@ -41,6 +44,9 @@ export function PayPalClient({
   const [type, setType] = useState<Type>('all')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const [search, setSearch] = useState('')
+  const [printing, setPrinting] = useState(false)
+  const gridApi = useRef<GridApi | null>(null)
   const act = useAction()
 
   const rows: Row[] = [
@@ -113,26 +119,40 @@ export function PayPalClient({
         </div>
       </div>
 
-      <section className={`${card} mt-6 overflow-hidden`}>
-        <table className="w-full">
-          <thead className="bg-banana-100 text-left"><tr><th className="px-4 py-2">Date</th><th className="px-4 py-2">Business</th><th className="px-4 py-2">Transaction ID</th><th className="px-4 py-2 text-right">Amount</th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.key}className="border-t border-banana-100">
-                <td className="px-4 py-2">{r.date ? prettyDay(r.date) : '-'}</td>
-                <td className="px-4 py-2 font-semibold">{r.business} <span className="ml-1 rounded-full bg-banana-100 px-2 text-xs">{r.tag}</span></td>
-                <td className="px-4 py-2 font-mono text-xs text-peel-700">{r.txnId || '-'}</td>
-                <td className={`px-4 py-2 text-right font-bold ${r.amount < 0 ? 'text-berry-500' : 'text-leaf-700'}`}>{r.amount < 0 ? '-' : '+'}{rm(Math.abs(r.amount))}{r.original && <span className="block text-xs font-semibold text-peel-500">{r.original}</span>}</td>
-              </tr>
-            ))}
-            {!rows.length && <tr><td colSpan={4} className="px-4 py-8 text-center text-peel-500">No PayPal records yet. Press Resync to import.</td></tr>}
-          </tbody>
-        </table>
+      <div className="no-print mt-6 flex flex-wrap items-center gap-3">
+        <input
+          type="search"
+          aria-label="Search transactions"
+          placeholder="Search business, ID or amount..."
+          className="min-w-0 flex-1 sm:max-w-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button type="button" className={btnGhost} onClick={() => gridApi.current?.exportDataAsCsv({ fileName: 'paysense-paypal-transactions.csv' })}>
+          <Icon name="print" /> Export CSV
+        </button>
+        <span className="text-sm text-peel-500">{rows.length} record{rows.length === 1 ? '' : 's'}. Click a column header to sort, or use its menu to filter.</span>
+      </div>
+
+      <section className={`${card} mt-3 overflow-hidden`}>
+        <PayPalGrid key={currentCode()} rows={rows} search={search} printing={printing} onReady={(api) => (gridApi.current = api)} />
       </section>
+      <GridCaption>Click a column header to sort, open its menu to filter, or use the search box above. Export CSV saves the rows currently shown.</GridCaption>
 
       <div className="no-print mt-4 flex items-center justify-end gap-3">
         <Feedback error={act.error} notice={act.notice} />
-        <button className={btnGhost} onClick={() => window.print()}><Icon name="print" /> Print Record</button>
+        <button
+          className={btnGhost}
+          onClick={() => {
+            setPrinting(true)
+            setTimeout(() => {
+              window.print()
+              setPrinting(false)
+            }, 400)
+          }}
+        >
+          <Icon name="print" /> Print Record
+        </button>
         <button className={btnPrimary} disabled={act.pending} onClick={() => act.run(() => syncPayPalAction())}>
           <Icon name="sync" /> {act.pending ? 'Syncing...' : 'Resync'}
         </button>
